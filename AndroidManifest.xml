@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.droid.xrdesk"
+    android:versionCode="1"
+    android:versionName="0.1">
+
+    <uses-sdk android:minSdkVersion="34" android:targetSdkVersion="35" />
+    <!-- Optional: XREAL glasses' IMU over USB host (XrealImuSource). -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <!-- Shizuku client (from the dev.rikka.shizuku:provider AAR manifest). -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
+    <application android:label="XR Desk" android:debuggable="true">
+        <!-- App icon: gets shell access through Shizuku, then shows DesktopActivity. -->
+        <activity android:name=".LaunchActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".DesktopActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|touchscreen"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+
+        <!-- Shizuku delivers its binder to the app through this provider. -->
+        <provider android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="com.droid.xrdesk.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+        <meta-data android:name="moe.shizuku.client.V3_SUPPORT" android:value="true" />
+    </application>
+
+    <!-- Started over adb so the app runs with the shell's permissions. -->
+    <instrumentation android:name=".ShellInstrumentation"
+        android:targetPackage="com.droid.xrdesk"
+        android:label="XR Desk shell access" />
+</manifest>
