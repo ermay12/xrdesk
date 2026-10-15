@@ -188,13 +188,13 @@ public class DesktopActivity extends Activity implements SensorEventListener, Ch
 
         Bundle args = shell.args();
         mPrefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        mFill = floatArg(args, "fill", 0.9f);
+        mFill = floatArg(args, "fill", 1.0f);
         mVdWidth = intArg(args, "width", 0);  // 0 = fill the screen
         mVdHeight = intArg(args, "height", 0);
         mVdDpi = intArg(args, "dpi", 240);
         mFocalPx = floatArg(args, "focal", 2262f);  // ~46 degree horizontal FOV across 1920px
         mDriftSec = floatArg(args, "drift", 0.5f);
-        mMaxOffset = floatArg(args, "max", 300f);
+        mMaxOffset = floatArg(args, "max", 600f);
         mPredictSec = floatArg(args, "predict", 8f) / 1000f;
         mDeadband = floatArg(args, "deadband", 0.004f);
         mRollMax = (float) Math.toRadians(floatArg(args, "rollmax", 15f));
@@ -440,11 +440,8 @@ public class DesktopActivity extends Activity implements SensorEventListener, Ch
         // No DESTROY_CONTENT_ON_REMOVAL: when a desktop goes away, its apps move to the phone
         // screen instead of closing (closing the Terminal would shut down the Linux VM).
         int base = publicFlag | ownContentOnly | supportsTouch | trusted | systemDecorations;
-        int[] attempts = {
-                base | ownGroup | alwaysUnlocked | noTouchFeedback | ownFocus | keepTopFocus,
-                base | ownFocus | keepTopFocus,
-                base,
-        };
+        int full = base | ownGroup | alwaysUnlocked | noTouchFeedback | ownFocus | keepTopFocus;
+        int[] attempts = {full, base | ownFocus | keepTopFocus, base};
         DisplayManager dm = getSystemService(DisplayManager.class);
         for (int flags : attempts) {
             try {

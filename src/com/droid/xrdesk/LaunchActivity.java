@@ -61,7 +61,7 @@ public class LaunchActivity extends Activity {
     private final ServiceConnection mConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
-            String[] options = parseOptions(prefs().getString("options", ""));
+            String[] options = withDisplay(parseOptions(prefs().getString("options", "")));
             new Thread(() -> startThrough(service, options), "xrdesk-shizuku").start();
         }
 
@@ -187,6 +187,22 @@ public class LaunchActivity extends Activity {
             out.add(kv.substring(eq + 1));
         }
         return out.toArray(new String[0]);
+    }
+
+    /**
+     * Opens XR Desk fullscreen on the display the icon was tapped on (e.g. the glasses, where
+     * desktop mode would otherwise give it a small floating window), unless a display is saved.
+     */
+    private String[] withDisplay(String[] options) {
+        for (int i = 0; i < options.length; i += 2) {
+            if (options[i].equals("display")) {
+                return options;
+            }
+        }
+        String[] out = Arrays.copyOf(options, options.length + 2);
+        out[options.length] = "display";
+        out[options.length + 1] = String.valueOf(getDisplay().getDisplayId());
+        return out;
     }
 
     private void fail(String reason) {

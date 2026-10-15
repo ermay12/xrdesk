@@ -10,10 +10,10 @@
 #   ./xrdesk.sh log                   follow the app's log
 #
 # start options (defaults in parentheses):
-#   fill      desktop size as a fraction of the screen, drawn 1:1 (0.9)
+#   fill      desktop size as a fraction of the screen, drawn 1:1 (1.0)
 #   width height   exact desktop size instead of fill;  dpi (240)
 #   focal     pixels the desktop slides per radian of rotation (2262)
-#   drift     seconds to drift back to center (0.5);  max  largest slide in px (300)
+#   drift     seconds to drift back to center (0.5);  max  largest slide in px (600)
 #   predict   look-ahead in ms (8);  deadband  ignored rotation speed in rad/s (0.004)
 #   monitors  number of desktops, 1-4 (2);  swipe  updown | leftright (updown)
 #   roll      1 = roll smoothing on (0);  rollmax  largest roll correction in degrees (15)
