@@ -6,6 +6,11 @@ the picture seems to stay put, and lets it drift back to center. Windows, taskba
 cursor all move together, and nothing is redrawn. It also turns the phone into a mouse and
 keyboard for the glasses. Tested on a Pixel 9a running Android 17.
 
+<p>
+  <img src="docs/main-screen.png" width="270" alt="Main screen: Stop, Pause, Recenter and Mouse, the drift time, max rotation and drift curve">
+  <img src="docs/mouse-screen.png" width="270" alt="Mouse screen: Back, Center cursor, Center screen, mouse speed, Right and Left click, the scroll strip and Type">
+</p>
+
 ## How it works
 
 - `StabilizerService` (foreground service) reads the glasses' IMU over USB (`XrealImuSource`)
