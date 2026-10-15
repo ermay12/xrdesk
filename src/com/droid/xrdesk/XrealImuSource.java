@@ -1,4 +1,4 @@
-package com.droid.xrdesk2;
+package com.droid.xrdesk;
 
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
@@ -15,9 +15,9 @@ import android.os.Process;
 import android.os.SystemClock;
 import android.util.Log;
 
-import com.droid.xrdesk2.xreal.GyroOffset;
-import com.droid.xrdesk2.xreal.RateRing;
-import com.droid.xrdesk2.xreal.XrealProtocol;
+import com.droid.xrdesk.xreal.GyroOffset;
+import com.droid.xrdesk.xreal.RateRing;
+import com.droid.xrdesk.xreal.XrealProtocol;
 
 import java.util.Locale;
 
@@ -31,8 +31,8 @@ import java.util.Locale;
  * Tested with xbx a01+ glasses on a Pixel 9a (Android 17): about 860 samples/s.
  */
 final class XrealImuSource {
-    private static final String TAG = "XRDesk2";
-    private static final String ACTION_USB_PERMISSION = "com.droid.xrdesk2.USB_PERMISSION";
+    private static final String TAG = "XRDesk";
+    private static final String ACTION_USB_PERMISSION = "com.droid.xrdesk.USB_PERMISSION";
     private static final int READ_TIMEOUT_MS = 200;
     private static final int WRITE_TIMEOUT_MS = 100;
     private static final long STALL_NS = 2_000_000_000L;      // no samples this long = failed
@@ -160,7 +160,7 @@ final class XrealImuSource {
             mListener.onStateChanged(false, "waiting for USB permission");
             return;
         }
-        Thread reader = new Thread(() -> run(device), "xrdesk2-xreal-imu");
+        Thread reader = new Thread(() -> run(device), "xrdesk-xreal-imu");
         mReader = reader;
         reader.start();
     }
@@ -442,7 +442,7 @@ final class XrealImuSource {
         private volatile boolean mRunning = true;
 
         Heartbeat(UsbDeviceConnection conn, Endpoints mcu) {
-            super("xrdesk2-xreal-heartbeat");
+            super("xrdesk-xreal-heartbeat");
             mConn = conn;
             mMcu = mcu;
         }

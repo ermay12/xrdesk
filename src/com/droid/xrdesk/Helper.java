@@ -1,4 +1,4 @@
-package com.droid.xrdesk2;
+package com.droid.xrdesk;
 
 import android.os.IBinder;
 import android.os.Parcel;

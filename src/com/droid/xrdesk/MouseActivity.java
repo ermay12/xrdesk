@@ -1,4 +1,4 @@
-package com.droid.xrdesk2;
+package com.droid.xrdesk;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -76,7 +76,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
     private static final int BUTTON_COLOR = 0xFF2A2A2A;
     private static final int PRESSED_COLOR = 0xFF5A5A5A;
 
-    private static final String TAG = "XRDesk2";
+    private static final String TAG = "XRDesk";
 
     private final Handler mMain = new Handler(Looper.getMainLooper());
     private HandlerThread mPointerThread;
@@ -149,7 +149,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
         mSensors = getSystemService(SensorManager.class);
         mRotation = mSensors.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
         mScrollNotchPx = inches(SCROLL_NOTCH_IN);
-        mPointerThread = new HandlerThread("xrdesk2-pointer", Process.THREAD_PRIORITY_DISPLAY);
+        mPointerThread = new HandlerThread("xrdesk-pointer", Process.THREAD_PRIORITY_DISPLAY);
         mPointerThread.start();
         mPointer = new Handler(mPointerThread.getLooper());
 
@@ -504,7 +504,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
         return mScrolling || (mButtonsDown != 0 && !mDragging) || SystemClock.uptimeMillis() < mHoldUntilMs;
     }
 
-    /** Logs the sensor rate and the longest gap every 10 s (adb logcat -s XRDesk2). */
+    /** Logs the sensor rate and the longest gap every 10 s (adb logcat -s XRDesk). */
     private void stats(long t) {
         if (mLastSampleNs != 0) {
             mMaxGapNs = Math.max(mMaxGapNs, t - mLastSampleNs);

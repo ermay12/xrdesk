@@ -1,4 +1,4 @@
-package com.droid.xrdesk2.xreal;
+package com.droid.xrdesk.xreal;
 
 /**
  * Run-time gyroscope bias correction: a time-based port of FusionOffset from

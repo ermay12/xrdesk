@@ -1,4 +1,4 @@
-package com.droid.xrdesk2.xreal;
+package com.droid.xrdesk.xreal;
 
 /**
  * Single-producer, single-consumer ring of (timestamp, right, up, roll rate) samples, so the

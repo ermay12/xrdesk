@@ -1,22 +1,22 @@
-package com.droid.xrdesk2;
+package com.droid.xrdesk;
 
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
-import com.droid.xrdesk2.motion.Stabilizer;
+import com.droid.xrdesk.motion.Stabilizer;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Settings, saved as one "key=value key=value" string (see xrdesk2.sh for the list):
- *   adb shell am start -n com.droid.xrdesk2/.MainActivity --es options "drift=0.3 max=400"
+ * Settings, saved as one "key=value key=value" string (see xrdesk.sh for the list):
+ *   adb shell am start -n com.droid.xrdesk/.MainActivity --es options "drift=0.3 max=400"
  * The app's sliders and curve choice change drift, max and curve in the same string.
  */
 final class Options {
-    private static final String TAG = "XRDesk2";
-    private static final String PREFS = "xrdesk2";
+    private static final String TAG = "XRDesk";
+    private static final String PREFS = "xrdesk";
     private static final String KEY = "options";
 
     final float focal;      // on-screen pixels per radian of head rotation

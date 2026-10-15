@@ -1,4 +1,4 @@
-package com.droid.xrdesk2;
+package com.droid.xrdesk;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -21,8 +21,8 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.view.Choreographer;
 
-import com.droid.xrdesk2.motion.Stabilizer;
-import com.droid.xrdesk2.xreal.RateRing;
+import com.droid.xrdesk.motion.Stabilizer;
+import com.droid.xrdesk.xreal.RateRing;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -39,16 +39,16 @@ import rikka.shizuku.Shizuku;
  * a worker for slow helper calls.
  */
 public class StabilizerService extends Service implements Choreographer.FrameCallback {
-    private static final String TAG = "XRDesk2";
+    private static final String TAG = "XRDesk";
     // Two independent wishes keep this service running: stabilizing, and the mouse screen being
     // open. Both need the shell helper; only stabilizing reads the glasses' IMU.
-    static final String ACTION_START = "com.droid.xrdesk2.action.START";      // stabilize
-    static final String ACTION_STOP = "com.droid.xrdesk2.action.STOP";        // stop stabilizing
-    static final String ACTION_MOUSE_ON = "com.droid.xrdesk2.action.MOUSE_ON";
-    static final String ACTION_MOUSE_OFF = "com.droid.xrdesk2.action.MOUSE_OFF";
-    static final String ACTION_PAUSE = "com.droid.xrdesk2.action.PAUSE";  // toggles
-    static final String ACTION_RECENTER = "com.droid.xrdesk2.action.RECENTER";
-    static final String ACTION_RELOAD = "com.droid.xrdesk2.action.RELOAD";  // settings changed
+    static final String ACTION_START = "com.droid.xrdesk.action.START";      // stabilize
+    static final String ACTION_STOP = "com.droid.xrdesk.action.STOP";        // stop stabilizing
+    static final String ACTION_MOUSE_ON = "com.droid.xrdesk.action.MOUSE_ON";
+    static final String ACTION_MOUSE_OFF = "com.droid.xrdesk.action.MOUSE_OFF";
+    static final String ACTION_PAUSE = "com.droid.xrdesk.action.PAUSE";  // toggles
+    static final String ACTION_RECENTER = "com.droid.xrdesk.action.RECENTER";
+    static final String ACTION_RELOAD = "com.droid.xrdesk.action.RELOAD";  // settings changed
     private static final String CHANNEL = "stabilizer";
     private static final int NOTIFICATION_ID = 1;
     private static final long RESEND_MS = 500;  // in case the display manager reset the projection
@@ -133,7 +133,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         startForeground(NOTIFICATION_ID, notification("Starting…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
 
         mOptions = Options.load(this);
-        mStabThread = new HandlerThread("xrdesk2-stab", Process.THREAD_PRIORITY_DISPLAY);
+        mStabThread = new HandlerThread("xrdesk-stab", Process.THREAD_PRIORITY_DISPLAY);
         mStabThread.start();
         mStab = new Handler(mStabThread.getLooper());
         mStab.post(() -> mChoreographer = Choreographer.getInstance());
@@ -146,7 +146,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         Shizuku.addBinderReceivedListenerSticky(mShizukuReady, mMain);
         mMain.postDelayed(() -> {
             if (mHelper == null && !mHelperBound && !Shizuku.pingBinder()) {
-                fail("Shizuku isn't running. Start it in the Shizuku app, then start XR Desk 2 again.");
+                fail("Shizuku isn't running. Start it in the Shizuku app, then start XR Desk again.");
             }
         }, 3000);
         Log.i(TAG, "service started, options: " + mOptions.text);
@@ -262,7 +262,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         if (Shizuku.isPreV11()) {
             fail("This Shizuku version is too old. Update Shizuku.");
         } else if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-            fail("XR Desk 2 isn't allowed to use Shizuku. Open XR Desk 2 and press Start to allow it.");
+            fail("XR Desk isn't allowed to use Shizuku. Open XR Desk and press Start to allow it.");
         } else {
             bindHelper();
         }
@@ -295,7 +295,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         public void onServiceConnected(ComponentName name, IBinder binder) {
             Helper helper = new Helper(binder);
             if (mStopping) {
-                new Thread(helper::detach, "xrdesk2-detach").start();
+                new Thread(helper::detach, "xrdesk-detach").start();
                 return;
             }
             mConnectedHelper = helper;
@@ -315,7 +315,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
 
     private void onAttached(Helper helper, Helper.Attached a) {
         if (mStopping) {
-            new Thread(helper::detach, "xrdesk2-detach").start();  // the worker is shut down
+            new Thread(helper::detach, "xrdesk-detach").start();  // the worker is shut down
             return;
         }
         if (a.error != null) {
@@ -495,7 +495,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
                 PendingIntent.FLAG_IMMUTABLE);
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_menu_view)
-                .setContentTitle(!sStabilizing ? "XR Desk 2 (mouse)" : sPaused ? "XR Desk 2 (paused)" : "XR Desk 2")
+                .setContentTitle(!sStabilizing ? "XR Desk (mouse)" : sPaused ? "XR Desk (paused)" : "XR Desk")
                 .setContentText(text)
                 .setContentIntent(open)
                 .setOngoing(true)

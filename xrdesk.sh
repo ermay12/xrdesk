@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Build, install and run XR Desk 2 on the phone connected over adb.
+# Build, install and run XR Desk on the phone connected over adb.
 #
-#   ./xrdesk2.sh build                compile build/xrdesk2.apk
-#   ./xrdesk2.sh test                 run the JVM unit tests (no device needed)
-#   ./xrdesk2.sh install              build and install (stops XR Desk 2 first)
-#   ./xrdesk2.sh start                start stabilizing (needs Shizuku running)
-#   ./xrdesk2.sh stop                 stop; the glasses' picture goes back to normal
-#   ./xrdesk2.sh pause | recenter     same as the notification buttons
-#   ./xrdesk2.sh options [key=value...]  save settings, applied right away; none = defaults
-#   ./xrdesk2.sh log                  follow the app's log
+#   ./xrdesk.sh build                compile build/xrdesk.apk
+#   ./xrdesk.sh test                 run the JVM unit tests (no device needed)
+#   ./xrdesk.sh install              build and install (stops XR Desk first)
+#   ./xrdesk.sh start                start stabilizing (needs Shizuku running)
+#   ./xrdesk.sh stop                 stop; the glasses' picture goes back to normal
+#   ./xrdesk.sh pause | recenter     same as the notification buttons
+#   ./xrdesk.sh mouse                 open the mouse screen
+#   ./xrdesk.sh options [key=value...]  save settings, applied right away; none = defaults
+#   ./xrdesk.sh log                  follow the app's log
 #
 # options (defaults in parentheses):
 #   focal     pixels the picture slides per radian of head rotation (2262)
@@ -27,9 +28,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PKG=com.droid.xrdesk2
+PKG=com.droid.xrdesk
 SDK=sdk
-APK=build/xrdesk2.apk
+APK=build/xrdesk.apk
 
 build() {
     rm -rf build
@@ -52,27 +53,28 @@ build() {
 
 unit_tests() {
     rm -rf build/test && mkdir -p build/test
-    javac --release 11 -d build/test src/com/droid/xrdesk2/xreal/*.java src/com/droid/xrdesk2/motion/*.java \
-        test/com/droid/xrdesk2/xreal/*.java test/com/droid/xrdesk2/motion/*.java
-    java -cp build/test com.droid.xrdesk2.xreal.XrealProtocolTest
-    java -cp build/test com.droid.xrdesk2.motion.StabilizerTest
+    javac --release 11 -d build/test src/com/droid/xrdesk/xreal/*.java src/com/droid/xrdesk/motion/*.java \
+        test/com/droid/xrdesk/xreal/*.java test/com/droid/xrdesk/motion/*.java
+    java -cp build/test com.droid.xrdesk.xreal.XrealProtocolTest
+    java -cp build/test com.droid.xrdesk.motion.StabilizerTest
 }
 
 service_action() {
-    adb shell am startservice -n "$PKG/.StabilizerService" -a "com.droid.xrdesk2.action.$1" >/dev/null
+    adb shell am startservice -n "$PKG/.StabilizerService" -a "com.droid.xrdesk.action.$1" >/dev/null
 }
 
 case "${1:-}" in
     build) build ;;
     test) unit_tests ;;
-    # Stopping XR Desk 2 makes the helper put the display back before the update.
+    # Stopping XR Desk makes the helper put the display back before the update.
     install) build && adb shell am force-stop "$PKG" && adb install -r "$APK" ;;
     start) adb shell am start -n "$PKG/.MainActivity" --display 0 --ez start true >/dev/null
-        sleep 3; adb logcat -d -s XRDesk2 | tail -20 ;;
+        sleep 3; adb logcat -d -s XRDesk | tail -20 ;;
     stop) adb shell am force-stop "$PKG" ;;
     pause) service_action PAUSE ;;
+    mouse) adb shell am start -n "$PKG/.MainActivity" --display 0 --ez mouse true >/dev/null ;;
     recenter) service_action RECENTER ;;
     options) shift; adb shell "am start -n $PKG/.MainActivity --display 0 --es options '$*'" >/dev/null ;;
-    log) adb logcat -s XRDesk2 ;;
-    *) sed -n '2,19p' "$0"; exit 1 ;;
+    log) adb logcat -s XRDesk ;;
+    *) sed -n '2,/^set -euo/p' "$0" | grep '^#'; exit 1 ;;
 esac

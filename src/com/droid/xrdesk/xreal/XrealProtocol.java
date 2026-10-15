@@ -1,4 +1,4 @@
-package com.droid.xrdesk2.xreal;
+package com.droid.xrdesk.xreal;
 
 import java.util.zip.CRC32;
 

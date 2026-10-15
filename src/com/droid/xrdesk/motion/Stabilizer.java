@@ -1,4 +1,4 @@
-package com.droid.xrdesk2.motion;
+package com.droid.xrdesk.motion;
 
 /**
  * Head rotation to a picture offset (plain Java, no Android). The picture slides against small

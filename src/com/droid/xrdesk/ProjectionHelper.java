@@ -1,4 +1,4 @@
-package com.droid.xrdesk2;
+package com.droid.xrdesk;
 
 import android.graphics.Rect;
 import android.os.Binder;
@@ -28,8 +28,8 @@ import java.util.regex.Pattern;
  * display changes; the next move overrides it again.
  */
 public class ProjectionHelper extends Binder {
-    static final String TAG = "XRDesk2";
-    static final String DESCRIPTOR = "com.droid.xrdesk2.ProjectionHelper";
+    static final String TAG = "XRDesk";
+    static final String DESCRIPTOR = "com.droid.xrdesk.ProjectionHelper";
     /** In: IBinder client, int display id (-1 = first external display), float fill. Out: String error, int display id, String name. */
     static final int ATTACH = FIRST_CALL_TRANSACTION;
     /** Oneway. In: int dx, int dy (pixels, + = right/down). */
@@ -394,7 +394,7 @@ public class ProjectionHelper extends Binder {
             } catch (InterruptedException ignored) {
             }
             System.exit(0);
-        }, "xrdesk2-helper-exit");
+        }, "xrdesk-helper-exit");
         t.setDaemon(true);
         t.start();
     }

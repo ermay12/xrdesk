@@ -1,4 +1,4 @@
-package com.droid.xrdesk2;
+package com.droid.xrdesk;
 
 import android.Manifest;
 import android.app.Activity;
@@ -30,7 +30,7 @@ import rikka.shizuku.Shizuku;
  * with a number box for the drift time, a slider for the largest compensated rotation and a
  * choice of drift curve (all applied right away).
  * Starting asks for Shizuku permission the first time. Over adb:
- *   am start -n com.droid.xrdesk2/.MainActivity --ez start true [--es options "key=value ..."]
+ *   am start -n com.droid.xrdesk/.MainActivity --ez start true [--es options "key=value ..."]
  */
 public class MainActivity extends Activity {
     private static final int SHIZUKU_REQUEST = 1;
@@ -65,7 +65,7 @@ public class MainActivity extends Activity {
         if (result == PackageManager.PERMISSION_GRANTED) {
             startStabilizer();
         } else {
-            mStatus.setText("XR Desk 2 wasn't allowed to use Shizuku. Allow it in the Shizuku app.");
+            mStatus.setText("XR Desk wasn't allowed to use Shizuku. Allow it in the Shizuku app.");
         }
     };
 
@@ -96,7 +96,7 @@ public class MainActivity extends Activity {
             return insets;
         });
         root.setBackgroundColor(Color.BLACK);
-        TextView title = text("XR Desk 2", 28);
+        TextView title = text("XR Desk", 28);
         mStatus = text("", 18);
         mStatus.setPadding(0, 24, 0, 24);
         mStartStop = button("Start", v -> {
@@ -197,7 +197,7 @@ public class MainActivity extends Activity {
         loadSliders();
     }
 
-    /** Extras from adb: "options" saves settings (applied right away), "start" starts. */
+    /** Extras from adb: "options" saves settings (applied right away), "start" starts, "mouse" opens the mouse screen. */
     private void handleIntent(Intent intent) {
         String options = intent.getStringExtra("options");
         if (options != null) {
@@ -206,6 +206,9 @@ public class MainActivity extends Activity {
         }
         if (intent.getBooleanExtra("start", false) && !StabilizerService.stabilizing()) {
             start();
+        }
+        if (intent.getBooleanExtra("mouse", false)) {
+            startActivity(new Intent(this, MouseActivity.class));
         }
     }
 
@@ -290,7 +293,7 @@ public class MainActivity extends Activity {
         } else if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
             startStabilizer();
         } else if (Shizuku.shouldShowRequestPermissionRationale()) {
-            mStatus.setText("XR Desk 2 was denied access to Shizuku. Allow it in the Shizuku app.");
+            mStatus.setText("XR Desk was denied access to Shizuku. Allow it in the Shizuku app.");
         } else {
             Shizuku.requestPermission(SHIZUKU_REQUEST);
         }

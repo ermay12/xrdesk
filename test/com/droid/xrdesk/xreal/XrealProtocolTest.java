@@ -1,4 +1,4 @@
-package com.droid.xrdesk2.xreal;
+package com.droid.xrdesk.xreal;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;

@@ -1,6 +1,6 @@
-package com.droid.xrdesk2.motion;
+package com.droid.xrdesk.motion;
 
-/** Plain-JVM tests for Stabilizer (run by ./xrdesk2.sh test). */
+/** Plain-JVM tests for Stabilizer (run by ./xrdesk.sh test). */
 public final class StabilizerTest {
     private static int sFailures;
 

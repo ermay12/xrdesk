@@ -1,4 +1,4 @@
-package com.droid.xrdesk2;
+package com.droid.xrdesk;
 
 import android.content.res.Configuration;
 import android.content.res.Resources;
@@ -236,7 +236,7 @@ final class MousePointer {
             mHotX = mHotY = DRAWN_HOTSPOT;
         }
         mCursor = new SurfaceControl.Builder()
-                .setName("XR Desk 2 pointer")
+                .setName("XR Desk pointer")
                 .setBufferSize(arrow.getWidth(), arrow.getHeight())
                 .setFormat(PixelFormat.TRANSLUCENT)
                 .build();

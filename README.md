@@ -1,9 +1,10 @@
-# XR Desk 2
+# XR Desk
 
 Stabilizes the whole picture of XREAL xbx a01/a01+ glasses on Android. Apps run normally on
-the glasses' desktop; XR Desk 2 shifts the display's output against small head movements, so
+the glasses' desktop; XR Desk shifts the display's output against small head movements, so
 the picture seems to stay put, and lets it drift back to center. Windows, taskbar and mouse
-cursor all move together, and nothing is redrawn. Tested on a Pixel 9a running Android 17.
+cursor all move together, and nothing is redrawn. It also turns the phone into a mouse and
+keyboard for the glasses. Tested on a Pixel 9a running Android 17.
 
 ## How it works
 
@@ -19,24 +20,31 @@ cursor all move together, and nothing is redrawn. Tested on a Pixel 9a running A
 sudo apt-get install -y --no-install-recommends adb openjdk-21-jdk-headless aapt apksigner zipalign
 ```
 
-`sdk/` and `libs/` are checked in (same sources as `~/xrdesk/README.md`). Builds need about 2 GB
-of free RAM. On the phone, Shizuku must be running (start it again after each reboot).
+`sdk/` and `libs/` are checked in. Builds need about 2 GB of free RAM. On the phone, Shizuku
+must be running (start it again after each reboot). To recreate `sdk/` and `libs/`:
+
+| File | Source |
+|---|---|
+| `sdk/android.jar` | `android.jar` from https://dl.google.com/android/repository/platform-37.2_r01.zip |
+| `sdk/android-34-res.jar` | `android.jar` from `platform-34-ext12_r01.zip`, same URL path (Debian's aapt can't read API 37) |
+| `sdk/r8.jar` | https://dl.google.com/android/maven2/com/android/tools/r8/8.13.25/r8-8.13.25.jar |
+| `libs/shizuku-*-13.1.5.jar` | `classes.jar` from the `dev.rikka.shizuku` api/provider/aidl/shared 13.1.5 AARs on Maven Central |
 
 ## Build and run
 
 ```sh
-./xrdesk2.sh test       # JVM unit tests
-./xrdesk2.sh install    # build and install
-./xrdesk2.sh start      # or open XR Desk 2 on the phone and press Start
-./xrdesk2.sh stop | pause | recenter | log
+./xrdesk.sh test       # JVM unit tests
+./xrdesk.sh install    # build and install
+./xrdesk.sh start      # or open XR Desk on the phone and press Start
+./xrdesk.sh stop | pause | recenter | mouse | log
 ```
 
 The first start asks for Shizuku permission and for access to the glasses. Choose
 **Always allow** for the glasses so the question doesn't come back after replugging.
 
-The app's screen and its notification have Start/Stop, Pause and Recenter. XR Desk 2 stops
+The app's screen and its notification have Start/Stop, Pause and Recenter. XR Desk stops
 when the glasses are unplugged; press Start again after plugging them back in. Settings are
-listed at the top of `xrdesk2.sh`.
+listed at the top of `xrdesk.sh`.
 
 ## Mouse screen
 
