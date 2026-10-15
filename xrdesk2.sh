@@ -13,7 +13,11 @@
 # options (defaults in parentheses):
 #   focal     pixels the picture slides per radian of head rotation (2262)
 #   drift     seconds to drift back to center (1.0);  max  largest slide in px (600)
-#             (both are also sliders in the app; the app shows max as degrees of head rotation)
+#             (both are also set in the app, which shows max as degrees of head rotation)
+#   curve     how the picture drifts back (smooth): smooth = starts slowly, speeds up, eases into
+#             center; exp = fastest at first, then creeps; linear = constant speed; accel = speeds
+#             up, then stops suddenly. All get halfway back from the max offset in drift * 0.69 s.
+#             Also a choice in the app.
 #   predict   look-ahead in ms (8);  deadband  ignored rotation speed in rad/s (0.004)
 #   fill      picture size as a fraction of the display, 0.5-1 (1.0); below 1 leaves room to slide
 #   display   display id to stabilize (first external display)

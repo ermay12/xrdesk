@@ -9,25 +9,40 @@ import android.graphics.Insets;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.WindowInsets;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import rikka.shizuku.Shizuku;
 
 /**
  * The app's screen: shows the stabilizer's status and starts, pauses, recenters and stops it,
- * with sliders for the drift time and the largest compensated rotation (applied right away).
+ * with a number box for the drift time, a slider for the largest compensated rotation and a
+ * choice of drift curve (all applied right away).
  * Starting asks for Shizuku permission the first time. Over adb:
  *   am start -n com.droid.xrdesk2/.MainActivity --ez start true [--es options "key=value ..."]
  */
 public class MainActivity extends Activity {
     private static final int SHIZUKU_REQUEST = 1;
     private static final int NOTIFICATION_REQUEST = 2;
-    private static final int DRIFT_STEPS_PER_SEC = 10;  // the drift slider moves in 0.1 s steps
+    // Drift curves, indexed by the Stabilizer constant: saved names and labels.
+    private static final String[] CURVE_NAMES = {"smooth", "exp", "linear", "accel"};
+    private static final String[] CURVE_LABELS = {
+            "Smooth: eases in, speeds up, eases into center",
+            "Exponential: fastest at first, then creeps",
+            "Linear: constant speed, stops at center",
+            "Speed up: accelerates, then stops suddenly",
+    };
 
     private final Handler mMain = new Handler(Looper.getMainLooper());
     private TextView mStatus;
@@ -36,9 +51,11 @@ public class MainActivity extends Activity {
     private Button mPause;
     private Button mRecenter;
     private TextView mDriftLabel;
-    private SeekBar mDrift;
+    private EditText mDriftInput;
     private TextView mMaxLabel;
     private SeekBar mMax;
+    private RadioGroup mCurve;
+    private boolean mLoading;  // showing saved settings, not a user change
     private boolean mStartWhenReady;
 
     private final Shizuku.OnRequestPermissionResultListener mPermissionListener = (requestCode, result) -> {
@@ -91,20 +108,55 @@ public class MainActivity extends Activity {
         });
         mPause = button("Pause", v -> send(StabilizerService.ACTION_PAUSE));
         mRecenter = button("Recenter", v -> send(StabilizerService.ACTION_RECENTER));
-        mDriftLabel = text("", 16);
+        mDriftLabel = text("Drift back to center, in seconds (higher = slower)", 16);
         mDriftLabel.setPadding(0, 48, 0, 8);
-        mDrift = slider(2, 30, v -> {
-            String seconds = String.valueOf(v / (float) DRIFT_STEPS_PER_SEC);
-            Options.put(this, "drift", seconds);
-            showDrift(v);
-            send(StabilizerService.ACTION_RELOAD);
+        mDriftInput = new EditText(this);
+        mDriftInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        mDriftInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        mDriftInput.setSingleLine(true);
+        mDriftInput.setTextSize(18);
+        mDriftInput.setTextColor(Color.WHITE);
+        // Applied when editing ends (Done, or tapping elsewhere), never half-typed.
+        mDriftInput.setOnFocusChangeListener((v, hasFocus) -> {
+            if (!hasFocus) {
+                applyDrift();
+            }
         });
+        mDriftInput.setOnEditorActionListener((v, actionId, event) -> {
+            // Done on the on-screen keyboard, or Enter on a physical one.
+            boolean enter = event != null && event.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER;
+            if (actionId != EditorInfo.IME_ACTION_DONE && !enter) {
+                return false;
+            }
+            getSystemService(InputMethodManager.class).hideSoftInputFromWindow(v.getWindowToken(), 0);
+            root.requestFocus();  // takes focus off the box, which applies it
+            return true;
+        });
+        // Lets the box give up focus, and keeps the keyboard from opening when the screen does.
+        root.setFocusableInTouchMode(true);
         mMaxLabel = text("", 16);
         mMaxLabel.setPadding(0, 32, 0, 8);
         mMax = slider(2, 30, degrees -> {
             Options.put(this, "max", String.valueOf(Math.round(Math.toRadians(degrees) * Options.load(this).focal)));
             showMax(degrees);
             send(StabilizerService.ACTION_RELOAD);
+        });
+        TextView curveLabel = text("Drift back curve", 16);
+        curveLabel.setPadding(0, 32, 0, 8);
+        mCurve = new RadioGroup(this);
+        for (int i = 0; i < CURVE_LABELS.length; i++) {
+            RadioButton b = new RadioButton(this);
+            b.setId(i + 1);  // RadioGroup ids must be positive: curve + 1
+            b.setText(CURVE_LABELS[i]);
+            b.setTextSize(16);
+            b.setTextColor(Color.WHITE);
+            mCurve.addView(b);
+        }
+        mCurve.setOnCheckedChangeListener((group, id) -> {
+            if (!mLoading && id > 0) {
+                Options.put(this, "curve", CURVE_NAMES[id - 1]);
+                send(StabilizerService.ACTION_RELOAD);
+            }
         });
         mOptionsText = text("", 14);
         mOptionsText.setTextColor(Color.GRAY);
@@ -115,11 +167,16 @@ public class MainActivity extends Activity {
         root.addView(mPause);
         root.addView(mRecenter);
         root.addView(mDriftLabel);
-        root.addView(mDrift);
+        root.addView(mDriftInput);
         root.addView(mMaxLabel);
         root.addView(mMax);
+        root.addView(curveLabel);
+        root.addView(mCurve);
         root.addView(mOptionsText);
-        setContentView(root);
+        ScrollView scroll = new ScrollView(this);  // fits short screens, e.g. the glasses
+        scroll.setBackgroundColor(Color.BLACK);
+        scroll.addView(root);
+        setContentView(scroll);
 
         Shizuku.addRequestPermissionResultListener(mPermissionListener, mMain);
         Shizuku.addBinderReceivedListenerSticky(mBinderListener, mMain);
@@ -160,17 +217,38 @@ public class MainActivity extends Activity {
     /** Shows the saved settings on the sliders (they may have been changed over adb). */
     private void loadSliders() {
         Options o = Options.load(this);
-        int drift = Math.round(o.drift * DRIFT_STEPS_PER_SEC);
         int degrees = (int) Math.round(Math.toDegrees(o.max / o.focal));
-        mDrift.setProgress(drift);
+        mDriftInput.setText(seconds(o.drift));
+        mDriftInput.setError(null);
         mMax.setProgress(degrees);
-        showDrift(drift);
         showMax(degrees);
+        mLoading = true;
+        mCurve.check(o.curve + 1);
+        mLoading = false;
     }
 
-    private void showDrift(int steps) {
-        mDriftLabel.setText(String.format(java.util.Locale.US, "Drift back to center: %.1f s (higher = slower)",
-                steps / (float) DRIFT_STEPS_PER_SEC));
+    /** Saves the typed drift time if it's a valid number of seconds. */
+    private void applyDrift() {
+        float value;
+        try {
+            value = Float.parseFloat(mDriftInput.getText().toString().trim());
+        } catch (NumberFormatException e) {
+            value = Float.NaN;
+        }
+        if (!(value > 0f) || Float.isInfinite(value)) {
+            mDriftInput.setError("Enter a number of seconds above 0");
+            return;
+        }
+        mDriftInput.setError(null);
+        if (value != Options.load(this).drift) {
+            Options.put(this, "drift", seconds(value));
+            send(StabilizerService.ACTION_RELOAD);
+        }
+    }
+
+    /** 3 rather than 3.0. */
+    private static String seconds(float value) {
+        return value == Math.rint(value) && value < 1e9f ? String.valueOf((long) value) : String.valueOf(value);
     }
 
     private void showMax(int degrees) {

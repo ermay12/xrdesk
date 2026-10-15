@@ -4,13 +4,15 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
+import com.droid.xrdesk2.motion.Stabilizer;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * Settings, saved as one "key=value key=value" string (see xrdesk2.sh for the list):
  *   adb shell am start -n com.droid.xrdesk2/.MainActivity --es options "drift=0.3 max=400"
- * The app's sliders change drift and max in the same string.
+ * The app's sliders and curve choice change drift, max and curve in the same string.
  */
 final class Options {
     private static final String TAG = "XRDesk2";
@@ -19,6 +21,7 @@ final class Options {
 
     final float focal;      // on-screen pixels per radian of head rotation
     final float drift;      // seconds to drift back to center
+    final int curve;        // drift curve, a Stabilizer constant; saved as smooth | exp | linear | accel
     final float max;        // largest offset, px
     final float predictMs;  // look-ahead covering display latency
     final float deadband;   // rad/s of rotation ignored as noise
@@ -34,6 +37,7 @@ final class Options {
         Map<String, String> m = parse(text);
         focal = f(m, "focal", 2262f);
         drift = f(m, "drift", 1f);
+        curve = Stabilizer.curveNamed(m.get("curve"));
         max = f(m, "max", 600f);
         predictMs = f(m, "predict", 8f);
         deadband = f(m, "deadband", 0.004f);
