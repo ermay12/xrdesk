@@ -46,9 +46,15 @@ Right and Left click sit at the bottom left; on the right, a scroll strip (drag 
 down) above the **Type** button. The cursor freezes while a button is held, so a press doesn't
 turn into a drag, and the Mouse speed slider sets how far it moves per degree.
 
-**Type** shows the glasses' keyboard on the phone: click a text field on the glasses and Gboard
-types straight into it. Tap Type again, or Back, to finish.
+**Typing:** click a text box on the glasses and Gboard opens on the phone, typing straight into
+it (with autocorrect); the controls move up above it, and typing ends when the keyboard closes.
+Back closes the keyboard (otherwise the system Back does nothing on this screen; the Back button
+at the top leaves). **Type** switches typing mode by hand, for apps that don't open the keyboard
+themselves. Android can't open the keyboard for another app's text box, so after closing it,
+click the text box again.
 
 The shell helper injects the mouse events and draws Android's arrow as a trusted overlay on the
-glasses (an untrusted layer over the click point makes Android drop the clicks). Typing mode sets
-the glasses' IME policy to "fall back to the phone" and keeps input focus on the glasses.
+glasses (an untrusted layer over the click point makes Android drop the clicks). While the mouse
+screen is open, the glasses' IME policy is "fall back to the phone"; after a click, focus stays on
+the glasses for up to 0.6 s while the helper checks whether a keyboard opened (IME touch region
+and visible IME insets), then typing mode starts or focus returns to the phone.
