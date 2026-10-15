@@ -7,12 +7,13 @@
 #   ./xrdesk2.sh start                start stabilizing (needs Shizuku running)
 #   ./xrdesk2.sh stop                 stop; the glasses' picture goes back to normal
 #   ./xrdesk2.sh pause | recenter     same as the notification buttons
-#   ./xrdesk2.sh options [key=value...]  save settings (used from the next start); none = defaults
+#   ./xrdesk2.sh options [key=value...]  save settings, applied right away; none = defaults
 #   ./xrdesk2.sh log                  follow the app's log
 #
 # options (defaults in parentheses):
 #   focal     pixels the picture slides per radian of head rotation (2262)
 #   drift     seconds to drift back to center (1.0);  max  largest slide in px (600)
+#             (both are also sliders in the app; the app shows max as degrees of head rotation)
 #   predict   look-ahead in ms (8);  deadband  ignored rotation speed in rad/s (0.004)
 #   fill      picture size as a fraction of the display, 0.5-1 (1.0); below 1 leaves room to slide
 #   display   display id to stabilize (first external display)

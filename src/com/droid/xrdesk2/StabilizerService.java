@@ -43,6 +43,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     static final String ACTION_STOP = "com.droid.xrdesk2.action.STOP";
     static final String ACTION_PAUSE = "com.droid.xrdesk2.action.PAUSE";  // toggles
     static final String ACTION_RECENTER = "com.droid.xrdesk2.action.RECENTER";
+    static final String ACTION_RELOAD = "com.droid.xrdesk2.action.RELOAD";  // settings changed
     private static final String CHANNEL = "stabilizer";
     private static final int NOTIFICATION_ID = 1;
     private static final long RESEND_MS = 500;  // in case the display manager reset the projection
@@ -67,7 +68,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     private final Binder mClientToken = new Binder();  // the helper restores the display if this process dies
     private final ExecutorService mWorker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean mRefreshPending = new AtomicBoolean();
-    private Options mOptions;
+    private volatile Options mOptions;
     private Shizuku.UserServiceArgs mHelperArgs;
     private boolean mHelperBound;
     private volatile Helper mHelper;      // attached and stabilizing
@@ -103,11 +104,11 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         startForeground(NOTIFICATION_ID, notification("Starting…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
 
         mOptions = Options.load(this);
-        mStabilizer.configure(mOptions.focal, mOptions.drift, mOptions.max, mOptions.predictMs / 1000f, mOptions.deadband);
         mStabThread = new HandlerThread("xrdesk2-stab", Process.THREAD_PRIORITY_DISPLAY);
         mStabThread.start();
         mStab = new Handler(mStabThread.getLooper());
         mStab.post(() -> mChoreographer = Choreographer.getInstance());
+        mStab.post(this::configure);
         mImu = new XrealImuSource(this, mImuListener);
         mDisplayManager = getSystemService(DisplayManager.class);
         mDisplayManager.registerDisplayListener(mDisplayListener, mMain);
@@ -134,6 +135,10 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
             setStatus(sStatus);
         } else if (ACTION_RECENTER.equals(action)) {
             mStab.post(this::recenter);
+        } else if (ACTION_RELOAD.equals(action)) {
+            mOptions = Options.load(this);
+            Log.i(TAG, "options: " + mOptions.text);
+            mStab.post(this::configure);
         }
         return START_NOT_STICKY;
     }
@@ -334,6 +339,12 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         }
         mLastSampleNs = t;
         mStabilizer.update(right, up, dt);
+    }
+
+    /** Stab thread. Applies the current settings. */
+    private void configure() {
+        Options o = mOptions;
+        mStabilizer.configure(o.focal, o.drift, o.max, o.predictMs / 1000f, o.deadband);
     }
 
     /** Stab thread. Back to center (also used when pausing, resuming or losing the IMU). */

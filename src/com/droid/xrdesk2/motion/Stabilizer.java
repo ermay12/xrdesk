@@ -21,13 +21,13 @@ public final class Stabilizer {
     private float mRateX;
     private float mRateY;
 
+    /** Takes effect from the next sample without recentering, so it can be tuned live. */
     public void configure(float focalPx, float driftSec, float maxOffset, float predictSec, float deadband) {
         mFocalPx = focalPx;
         mDriftSec = Math.max(0.01f, driftSec);
         mMaxOffset = Math.max(0f, maxOffset);
         mPredictSec = predictSec;
         mDeadband = deadband;
-        reset();
     }
 
     /** Back to center, at rest. */

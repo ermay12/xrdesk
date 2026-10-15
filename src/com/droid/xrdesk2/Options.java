@@ -4,12 +4,13 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * Settings, saved as one "key=value key=value" string (see xrdesk2.sh for the list):
  *   adb shell am start -n com.droid.xrdesk2/.MainActivity --es options "drift=0.3 max=400"
+ * The app's sliders change drift and max in the same string.
  */
 final class Options {
     private static final String TAG = "XRDesk2";
@@ -52,12 +53,23 @@ final class Options {
         Log.i(TAG, "saved options: " + text.trim());
     }
 
+    /** Sets one key, keeping the others. */
+    static void put(Context context, String key, String value) {
+        Map<String, String> m = parse(load(context).text);
+        m.put(key, value);
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> e : m.entrySet()) {
+            sb.append(sb.length() == 0 ? "" : " ").append(e.getKey()).append('=').append(e.getValue());
+        }
+        prefs(context).edit().putString(KEY, sb.toString()).apply();
+    }
+
     private static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     private static Map<String, String> parse(String text) {
-        Map<String, String> m = new HashMap<>();
+        Map<String, String> m = new LinkedHashMap<>();
         for (String kv : text.trim().split("\\s+")) {
             int eq = kv.indexOf('=');
             if (eq > 0 && eq < kv.length() - 1) {
