@@ -20,6 +20,7 @@ final class Options {
     private static final String KEY = "options";
 
     final float focal;      // on-screen pixels per radian of head rotation
+    final float pointer;    // mouse screen: cursor pixels per radian of phone rotation
     final float drift;      // seconds to drift back to center
     final int curve;        // drift curve, a Stabilizer constant; saved as smooth | exp | linear | accel
     final float max;        // largest offset, px
@@ -36,6 +37,7 @@ final class Options {
         this.text = text;
         Map<String, String> m = parse(text);
         focal = f(m, "focal", 2262f);
+        pointer = f(m, "pointer", focal);  // default: the cursor follows where the phone points
         drift = f(m, "drift", 1f);
         curve = Stabilizer.curveNamed(m.get("curve"));
         max = f(m, "max", 600f);

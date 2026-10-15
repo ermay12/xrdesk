@@ -40,7 +40,12 @@ import rikka.shizuku.Shizuku;
  */
 public class StabilizerService extends Service implements Choreographer.FrameCallback {
     private static final String TAG = "XRDesk2";
-    static final String ACTION_STOP = "com.droid.xrdesk2.action.STOP";
+    // Two independent wishes keep this service running: stabilizing, and the mouse screen being
+    // open. Both need the shell helper; only stabilizing reads the glasses' IMU.
+    static final String ACTION_START = "com.droid.xrdesk2.action.START";      // stabilize
+    static final String ACTION_STOP = "com.droid.xrdesk2.action.STOP";        // stop stabilizing
+    static final String ACTION_MOUSE_ON = "com.droid.xrdesk2.action.MOUSE_ON";
+    static final String ACTION_MOUSE_OFF = "com.droid.xrdesk2.action.MOUSE_OFF";
     static final String ACTION_PAUSE = "com.droid.xrdesk2.action.PAUSE";  // toggles
     static final String ACTION_RECENTER = "com.droid.xrdesk2.action.RECENTER";
     static final String ACTION_RELOAD = "com.droid.xrdesk2.action.RELOAD";  // settings changed
@@ -49,8 +54,11 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     private static final long RESEND_MS = 500;  // in case the display manager reset the projection
 
     private static volatile String sStatus = "Stopped";
+    private static volatile StabilizerService sInstance;
     private static volatile boolean sRunning;
     private static volatile boolean sPaused;
+    private static volatile boolean sStabilizing;  // wanted, main thread writes
+    private static volatile boolean sMouseOn;
 
     static String status() {
         return sStatus;
@@ -64,6 +72,23 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         return sPaused;
     }
 
+    /** Running and stabilizing (not just serving the mouse screen). */
+    static boolean stabilizing() {
+        return sRunning && sStabilizing;
+    }
+
+    /** The shell helper once attached to the glasses (used by the mouse screen), else null. */
+    static Helper helper() {
+        StabilizerService s = sInstance;
+        return s != null ? s.mHelper : null;
+    }
+
+    /** The glasses' display id once the helper is attached, else -1. */
+    static int displayId() {
+        StabilizerService s = sInstance;
+        return s != null && s.mHelper != null ? s.mDisplayId : -1;
+    }
+
     private final Handler mMain = new Handler(Looper.getMainLooper());
     private final Binder mClientToken = new Binder();  // the helper restores the display if this process dies
     private final ExecutorService mWorker = Executors.newSingleThreadExecutor();
@@ -73,12 +98,13 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     private boolean mHelperBound;
     private volatile Helper mHelper;      // attached and stabilizing
     private Helper mConnectedHelper;      // main thread; told to exit when this service stops
-    private int mDisplayId = -1;
+    private volatile int mDisplayId = -1;
     private String mDisplayName;
     private DisplayManager mDisplayManager;
     private XrealImuSource mImu;
     private volatile boolean mStreaming;
     private boolean mStopping;
+    private boolean mFailed;  // keep the failure as the status after stopping
 
     // Stab thread
     private HandlerThread mStabThread;
@@ -97,8 +123,11 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     @Override
     public void onCreate() {
         super.onCreate();
+        sInstance = this;
         sRunning = true;
         sPaused = false;
+        sStabilizing = false;  // set by the start actions
+        sMouseOn = false;
         getSystemService(NotificationManager.class).createNotificationChannel(
                 new NotificationChannel(CHANNEL, "Stabilizer", NotificationManager.IMPORTANCE_LOW));
         startForeground(NOTIFICATION_ID, notification("Starting…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
@@ -125,9 +154,21 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // Started with startForegroundService(): confirm being in the foreground every time.
+        startForeground(NOTIFICATION_ID, notification(sStatus), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
         String action = intent != null ? intent.getAction() : null;
-        if (ACTION_STOP.equals(action)) {
-            stopSelf();
+        if (action == null || ACTION_START.equals(action)) {
+            setStabilizing(true);
+        } else if (ACTION_STOP.equals(action)) {
+            setStabilizing(false);
+        } else if (ACTION_MOUSE_ON.equals(action)) {
+            sMouseOn = true;
+            if (!sStabilizing && mHelper != null) {
+                setStatus(MOUSE_ONLY);
+            }
+        } else if (ACTION_MOUSE_OFF.equals(action)) {
+            sMouseOn = false;
+            stopIfUnused();
         } else if (ACTION_PAUSE.equals(action)) {
             sPaused = !sPaused;
             Log.i(TAG, sPaused ? "paused" : "resumed");
@@ -143,6 +184,37 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         return START_NOT_STICKY;
     }
 
+    private static final String MOUSE_ONLY = "Mouse only (not stabilizing)";
+
+    /** Main thread. Starts or stops stabilizing; the service keeps running for the mouse screen. */
+    private void setStabilizing(boolean on) {
+        if (on == sStabilizing) {
+            return;
+        }
+        sStabilizing = on;
+        Log.i(TAG, on ? "stabilizing on" : "stabilizing off");
+        if (on) {
+            if (mHelper != null) {
+                setStatus("Waiting for the glasses' motion sensor…");
+                mImu.start();
+            }
+        } else if (!stopIfUnused()) {
+            mImu.stop();
+            mStreaming = false;
+            mStab.post(this::recenter);  // back to the normal picture
+            setStatus(MOUSE_ONLY);
+        }
+    }
+
+    /** Stops the service when neither stabilizing nor the mouse screen needs it. */
+    private boolean stopIfUnused() {
+        if (!sStabilizing && !sMouseOn) {
+            stopSelf();
+            return true;
+        }
+        return false;
+    }
+
     @Override
     public IBinder onBind(Intent intent) {
         return null;
@@ -153,6 +225,11 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         super.onDestroy();
         mStopping = true;
         sRunning = false;
+        sStabilizing = false;
+        sMouseOn = false;
+        if (sInstance == this) {
+            sInstance = null;
+        }
         mMain.removeCallbacksAndMessages(null);
         mImu.stop();
         mDisplayManager.unregisterDisplayListener(mDisplayListener);
@@ -170,7 +247,9 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         }
         mWorker.shutdown();
         mStabThread.quitSafely();
-        sStatus = "Stopped";
+        if (!mFailed) {
+            sStatus = "Stopped";
+        }
         Log.i(TAG, "service stopped");
     }
 
@@ -246,9 +325,13 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         mHelper = helper;
         mDisplayId = a.displayId;
         mDisplayName = a.name;
-        Log.i(TAG, "stabilizing display " + a.displayId + " (" + a.name + ")");
-        setStatus("Waiting for the glasses' motion sensor…");
-        mImu.start();
+        Log.i(TAG, "attached to display " + a.displayId + " (" + a.name + ")");
+        if (sStabilizing) {
+            setStatus("Waiting for the glasses' motion sensor…");
+            mImu.start();
+        } else {
+            setStatus(MOUSE_ONLY);
+        }
     }
 
     private final DisplayManager.DisplayListener mDisplayListener = new DisplayManager.DisplayListener() {
@@ -292,8 +375,8 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         @Override
         public void onStateChanged(boolean streaming, String detail) {
             mMain.post(() -> {
-                if (mStopping) {
-                    return;
+                if (mStopping || !sStabilizing) {
+                    return;  // stopped on purpose; the status already says so
                 }
                 mStreaming = streaming;
                 if (streaming) {
@@ -391,6 +474,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     // ---- Status and notification (main thread) ----
 
     private void fail(String message) {
+        mFailed = true;
         Log.e(TAG, message);
         setStatus(message);
         if (!mStopping) {
@@ -411,7 +495,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
                 PendingIntent.FLAG_IMMUTABLE);
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_menu_view)
-                .setContentTitle(sPaused ? "XR Desk 2 (paused)" : "XR Desk 2")
+                .setContentTitle(!sStabilizing ? "XR Desk 2 (mouse)" : sPaused ? "XR Desk 2 (paused)" : "XR Desk 2")
                 .setContentText(text)
                 .setContentIntent(open)
                 .setOngoing(true)

@@ -19,6 +19,8 @@
 #             up, then stops suddenly. All get halfway back from the max offset in drift * 0.69 s.
 #             Also a choice in the app.
 #   predict   look-ahead in ms (8);  deadband  ignored rotation speed in rad/s (0.004)
+#   pointer   mouse screen: cursor pixels per radian the phone turns (focal: the cursor goes
+#             where the phone points). Also the Mouse speed slider on the mouse screen (pointer / focal).
 #   fill      picture size as a fraction of the display, 0.5-1 (1.0); below 1 leaves room to slide
 #   display   display id to stabilize (first external display)
 #   imuswap   1 = swap horizontal and vertical;  imuinvx / imuinvy  1 = reverse that direction

@@ -75,6 +75,75 @@ final class Helper {
         }
     }
 
+    // ---- Mouse (oneway, in order) ----
+
+    void mouseShow(boolean show) {
+        Parcel data = start();
+        data.writeBoolean(show);
+        oneway(ProjectionHelper.MOUSE_SHOW, data);
+    }
+
+    void mouseMove(float x, float y) {
+        Parcel data = start();
+        data.writeFloat(x);
+        data.writeFloat(y);
+        oneway(ProjectionHelper.MOUSE_MOVE, data);
+    }
+
+    void mouseButton(int button, boolean down, int homeDisplay) {
+        Parcel data = start();
+        data.writeInt(button);
+        data.writeBoolean(down);
+        data.writeInt(homeDisplay);
+        oneway(ProjectionHelper.MOUSE_BUTTON, data);
+    }
+
+    void mouseScroll(float notches) {
+        Parcel data = start();
+        data.writeFloat(notches);
+        oneway(ProjectionHelper.MOUSE_SCROLL, data);
+    }
+
+    /** Typing mode: the glasses' keyboard shows on the phone. Returns false if that failed. */
+    boolean keyboardOnPhone(boolean on) {
+        Parcel data = start();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeBoolean(on);
+            mBinder.transact(ProjectionHelper.KEYBOARD_ON_PHONE, data, reply, 0);
+            reply.readException();
+            return reply.readBoolean();
+        } catch (RemoteException | RuntimeException e) {
+            return false;
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
+    /** Gives input focus to a display's top task. */
+    void focusDisplay(int displayId) {
+        Parcel data = start();
+        data.writeInt(displayId);
+        oneway(ProjectionHelper.FOCUS_DISPLAY, data);
+    }
+
+    private static Parcel start() {
+        Parcel data = Parcel.obtain();
+        data.writeInterfaceToken(ProjectionHelper.DESCRIPTOR);
+        return data;
+    }
+
+    private void oneway(int code, Parcel data) {
+        try {
+            mBinder.transact(code, data, null, IBinder.FLAG_ONEWAY);
+        } catch (RemoteException | RuntimeException ignored) {
+            // The helper died; the service notices through its Shizuku connection.
+        } finally {
+            data.recycle();
+        }
+    }
+
     /** Puts the display back as it was; the helper then exits. */
     void detach() {
         Parcel data = Parcel.obtain();

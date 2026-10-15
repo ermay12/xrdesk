@@ -100,7 +100,7 @@ public class MainActivity extends Activity {
         mStatus = text("", 18);
         mStatus.setPadding(0, 24, 0, 24);
         mStartStop = button("Start", v -> {
-            if (StabilizerService.running()) {
+            if (StabilizerService.stabilizing()) {
                 send(StabilizerService.ACTION_STOP);
             } else {
                 start();
@@ -108,6 +108,7 @@ public class MainActivity extends Activity {
         });
         mPause = button("Pause", v -> send(StabilizerService.ACTION_PAUSE));
         mRecenter = button("Recenter", v -> send(StabilizerService.ACTION_RECENTER));
+        Button mouse = button("Mouse", v -> startActivity(new Intent(this, MouseActivity.class)));
         mDriftLabel = text("Drift back to center, in seconds (higher = slower)", 16);
         mDriftLabel.setPadding(0, 48, 0, 8);
         mDriftInput = new EditText(this);
@@ -166,6 +167,7 @@ public class MainActivity extends Activity {
         root.addView(mStartStop);
         root.addView(mPause);
         root.addView(mRecenter);
+        root.addView(mouse);
         root.addView(mDriftLabel);
         root.addView(mDriftInput);
         root.addView(mMaxLabel);
@@ -202,7 +204,7 @@ public class MainActivity extends Activity {
             Options.save(this, options);
             send(StabilizerService.ACTION_RELOAD);
         }
-        if (intent.getBooleanExtra("start", false) && !StabilizerService.running()) {
+        if (intent.getBooleanExtra("start", false) && !StabilizerService.stabilizing()) {
             start();
         }
     }
@@ -222,6 +224,7 @@ public class MainActivity extends Activity {
         mDriftInput.setError(null);
         mMax.setProgress(degrees);
         showMax(degrees);
+
         mLoading = true;
         mCurve.check(o.curve + 1);
         mLoading = false;
@@ -294,7 +297,7 @@ public class MainActivity extends Activity {
     }
 
     private void startStabilizer() {
-        startForegroundService(new Intent(this, StabilizerService.class));
+        startForegroundService(new Intent(this, StabilizerService.class).setAction(StabilizerService.ACTION_START));
         mMain.postDelayed(this::refresh, 100);
     }
 
@@ -306,7 +309,7 @@ public class MainActivity extends Activity {
     }
 
     private void refresh() {
-        boolean running = StabilizerService.running();
+        boolean running = StabilizerService.stabilizing();
         if (!mStartWhenReady) {
             mStatus.setText(StabilizerService.status());
         }

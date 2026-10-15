@@ -26,6 +26,11 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".MouseActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
         <service android:name=".StabilizerService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />

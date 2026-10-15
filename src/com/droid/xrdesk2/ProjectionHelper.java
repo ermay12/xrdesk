@@ -21,6 +21,8 @@ import java.util.regex.Pattern;
  * moving the display rect of that projection; nothing is redrawn. Reached through raw Binder
  * transactions (this build has no AIDL compiler); see Helper for the client side.
  *
+ * It also runs the mouse screen's pointer (MousePointer), since injecting input needs the shell.
+ *
  * The base projection (what the display manager set) is read from `dumpsys display` and put back
  * when the app detaches or dies. The display manager re-applies its own projection whenever the
  * display changes; the next move overrides it again.
@@ -36,6 +38,19 @@ public class ProjectionHelper extends Binder {
     static final int REFRESH = FIRST_CALL_TRANSACTION + 2;
     /** Puts the base projection back, then exits. */
     static final int DETACH = FIRST_CALL_TRANSACTION + 3;
+    /** Oneway mouse calls (see MousePointer). In: boolean show. */
+    static final int MOUSE_SHOW = FIRST_CALL_TRANSACTION + 4;
+    /** In: float x, float y (display pixels). */
+    static final int MOUSE_MOVE = FIRST_CALL_TRANSACTION + 5;
+    /** In: int MotionEvent button, boolean down, int display to refocus after the last release (-1 = none). */
+    static final int MOUSE_BUTTON = FIRST_CALL_TRANSACTION + 6;
+    /** In: float wheel notches, positive = up. */
+    static final int MOUSE_SCROLL = FIRST_CALL_TRANSACTION + 7;
+    /** In: boolean: show the glasses' keyboard on the phone (typing mode). Out: boolean ok. */
+    static final int KEYBOARD_ON_PHONE = FIRST_CALL_TRANSACTION + 8;
+    /** Oneway. In: int display id whose top task gets input focus. */
+    static final int FOCUS_DISPLAY = FIRST_CALL_TRANSACTION + 9;
+    private static final int IME_POLICY_FALLBACK_DISPLAY = 1;  // WindowManager.DISPLAY_IME_POLICY_FALLBACK_DISPLAY
     /** Reserved by Shizuku: sent when the service should exit. */
     private static final int TRANSACTION_DESTROY = 16777114;
     private static final int TYPE_EXTERNAL = 2;  // android.view.Display.TYPE_EXTERNAL (hidden)
@@ -52,6 +67,9 @@ public class ProjectionHelper extends Binder {
     private int mDx;
     private int mDy;
     private boolean mAttached;
+    private volatile MousePointer mMouse;
+    private int mDisplayId = -1;
+    private int mSavedImePolicy = -1;  // the glasses' own keyboard policy while typing mode changed it
 
     public ProjectionHelper() {
     }
@@ -91,6 +109,37 @@ public class ProjectionHelper extends Binder {
                 reply.writeNoException();
                 exitSoon();
                 return true;
+            case KEYBOARD_ON_PHONE: {
+                data.enforceInterface(DESCRIPTOR);
+                boolean ok = keyboardOnPhone(data.readBoolean());
+                reply.writeNoException();
+                reply.writeBoolean(ok);
+                return true;
+            }
+            case FOCUS_DISPLAY:
+                data.enforceInterface(DESCRIPTOR);
+                MousePointer.focusDisplay(data.readInt());
+                return true;
+            case MOUSE_SHOW:
+            case MOUSE_MOVE:
+            case MOUSE_BUTTON:
+            case MOUSE_SCROLL: {
+                data.enforceInterface(DESCRIPTOR);
+                MousePointer mouse = mMouse;
+                if (mouse == null) {
+                    return true;
+                }
+                if (code == MOUSE_SHOW) {
+                    mouse.show(data.readBoolean());
+                } else if (code == MOUSE_MOVE) {
+                    mouse.move(data.readFloat(), data.readFloat());
+                } else if (code == MOUSE_BUTTON) {
+                    mouse.button(data.readInt(), data.readBoolean(), data.readInt());
+                } else {
+                    mouse.scroll(data.readFloat());
+                }
+                return true;
+            }
             default:
                 return super.onTransact(code, data, reply, flags);
         }
@@ -132,6 +181,12 @@ public class ProjectionHelper extends Binder {
                     return new String[]{base.error, null, null};
                 }
                 setBase(base);
+                if (mMouse != null) {
+                    mMouse.release();
+                }
+                mMouse = new MousePointer(id, base.layerStackId, intField(info, "logicalWidth"),
+                        intField(info, "logicalHeight"), intField(info, "logicalDensityDpi"));
+                mDisplayId = id;
                 mFill = Math.max(0.5f, Math.min(1f, fill));
                 mDx = 0;
                 mDy = 0;
@@ -219,7 +274,42 @@ public class ProjectionHelper extends Binder {
         }
     }
 
+    /**
+     * Typing mode: Android shows the keyboard for a display's text fields on that display, or with
+     * the "fallback" policy on the phone. While on, Gboard opens on the phone and types straight
+     * into the focused field on the glasses. The display manager keeps the policy per display, so
+     * the glasses' own policy is put back afterwards (also on detach).
+     */
+    private synchronized boolean keyboardOnPhone(boolean on) {
+        try {
+            IBinder binder = (IBinder) Class.forName("android.os.ServiceManager")
+                    .getMethod("getService", String.class).invoke(null, "window");
+            Object wm = Class.forName("android.view.IWindowManager$Stub")
+                    .getMethod("asInterface", IBinder.class).invoke(null, binder);
+            Method get = wm.getClass().getMethod("getDisplayImePolicy", int.class);
+            Method set = wm.getClass().getMethod("setDisplayImePolicy", int.class, int.class);
+            if (on && mSavedImePolicy < 0) {
+                mSavedImePolicy = (int) get.invoke(wm, mDisplayId);
+                set.invoke(wm, mDisplayId, IME_POLICY_FALLBACK_DISPLAY);
+            } else if (!on && mSavedImePolicy >= 0) {
+                set.invoke(wm, mDisplayId, mSavedImePolicy);
+                mSavedImePolicy = -1;
+            }
+            Log.i(TAG, "helper: keyboard for display " + mDisplayId + (on ? " on the phone" : " back to its own policy"));
+            return true;
+        } catch (Throwable e) {
+            Log.e(TAG, "helper: couldn't change the keyboard policy", e);
+            return false;
+        }
+    }
+
     private synchronized void restore() {
+        keyboardOnPhone(false);
+        MousePointer mouse = mMouse;
+        mMouse = null;
+        if (mouse != null) {
+            mouse.release();
+        }
         if (mAttached) {
             mAttached = false;
             project(mBaseDisplay);
@@ -257,6 +347,7 @@ public class ProjectionHelper extends Binder {
         String unique = "mUniqueId=local:" + physicalId;
         boolean inDevice = false;
         Integer orientation = null;
+        Integer layerStackId = null;
         Rect layerStack = null;
         Rect display = null;
         try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
@@ -268,6 +359,8 @@ public class ProjectionHelper extends Binder {
                         break;
                     }
                     inDevice = s.equals(unique);
+                } else if (inDevice && s.startsWith("mCurrentLayerStack=")) {
+                    layerStackId = Integer.parseInt(s.substring("mCurrentLayerStack=".length()));
                 } else if (inDevice && s.startsWith("mCurrentOrientation=")) {
                     orientation = Integer.parseInt(s.substring("mCurrentOrientation=".length()));
                 } else if (inDevice && s.startsWith("mCurrentLayerStackRect=")) {
@@ -279,11 +372,12 @@ public class ProjectionHelper extends Binder {
         }
         p.waitFor();
         Base base = new Base();
-        if (orientation == null || layerStack == null || display == null || display.isEmpty()) {
+        if (orientation == null || layerStackId == null || layerStack == null || display == null || display.isEmpty()) {
             base.error = "couldn't read the projection of physical display " + physicalId + " from dumpsys display";
             return base;
         }
         base.orientation = orientation;
+        base.layerStackId = layerStackId;
         base.layerStack = layerStack;
         base.display = display;
         return base;
@@ -292,6 +386,7 @@ public class ProjectionHelper extends Binder {
     private static final class Base {
         String error;
         int orientation;
+        int layerStackId;
         Rect layerStack;
         Rect display;
     }
