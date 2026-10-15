@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.droid.xrdesk"
     android:versionCode="1"
-    android:versionName="0.1">
+    android:versionName="0.1.0">
 
     <uses-sdk android:minSdkVersion="34" android:targetSdkVersion="35" />
     <!-- XREAL glasses' IMU over USB host (XrealImuSource). -->
@@ -15,7 +15,8 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <application android:label="XR Desk" android:debuggable="true">
+    <!-- Debuggable only in development builds (xrdesk.sh build passes aapt debug mode). -->
+    <application android:label="XR Desk">
         <activity android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"

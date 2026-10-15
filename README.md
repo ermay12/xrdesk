@@ -1,73 +1,92 @@
 # XR Desk
 
-Stabilizes the whole picture of XREAL xbx a01/a01+ glasses on Android. Apps run normally on
-the glasses' desktop; XR Desk shifts the display's output against small head movements, so
-the picture seems to stay put, and lets it drift back to center. Windows, taskbar and mouse
-cursor all move together, and nothing is redrawn. It also turns the phone into a mouse and
-keyboard for the glasses. Tested on a Pixel 9a running Android 17.
+A steady screen for XREAL glasses on Android, plus your phone as a mouse and keyboard.
+
+Display glasses show a screen that's fixed to your head, so every small head movement drags the
+whole picture along. XR Desk keeps the picture still against small movements and lets it drift
+gently back to center, so it feels more like a monitor in front of you. Your apps keep running
+normally on the glasses' desktop; XR Desk moves the whole picture (windows, taskbar and cursor)
+without redrawing anything.
 
 <p>
   <img src="docs/main-screen.png" width="270" alt="Main screen: Stop, Pause, Recenter and Mouse, the drift time, max rotation and drift curve">
   <img src="docs/mouse-screen.png" width="270" alt="Mouse screen: Back, Center cursor, Center screen, mouse speed, Right and Left click, the scroll strip and Type">
 </p>
 
-## How it works
+## Features
 
-- `StabilizerService` (foreground service) reads the glasses' IMU over USB (`XrealImuSource`)
-  and turns head rotation into an offset (`motion/Stabilizer`), once per frame.
-- `ProjectionHelper` runs as the shell user through Shizuku. It moves the display rect of the
-  glasses' SurfaceFlinger projection by that offset, and puts the original back when the app
-  stops or dies.
+- **Stabilization**: the picture stays put when you move your head a little, then drifts back
+  to center. You choose how fast it drifts back, how far it compensates, and the drift curve.
+- **Phone as a mouse**: point the top of the phone at the glasses' screen to move the cursor;
+  left click, right click, drag and scroll.
+- **Phone as a keyboard**: click a text box on the glasses and your phone's keyboard opens,
+  typing straight into it, autocorrect included.
 
-## Setup (this Linux VM)
+## Requirements
 
-```sh
-sudo apt-get install -y --no-install-recommends adb openjdk-21-jdk-headless aapt apksigner zipalign
-```
+- **XREAL xbx a01 or a01+ glasses**, connected to the phone over USB-C. Stabilization reads
+  their motion sensor; other glasses aren't supported yet.
+- **An Android phone that drives the glasses as a desktop**, with Android 14 or newer. XR Desk is
+  developed and tested on a Pixel 9a with Android 17. It relies on parts of Android that aren't
+  official APIs, so other phones and versions may not work.
+- **[Shizuku](https://shizuku.rikka.app/)**, which gives XR Desk the extra permissions it needs
+  (see below). No root needed.
 
-`sdk/` and `libs/` are checked in. Builds need about 2 GB of free RAM. On the phone, Shizuku
-must be running (start it again after each reboot). To recreate `sdk/` and `libs/`:
+## Install
 
-| File | Source |
-|---|---|
-| `sdk/android.jar` | `android.jar` from https://dl.google.com/android/repository/platform-37.2_r01.zip |
-| `sdk/android-34-res.jar` | `android.jar` from `platform-34-ext12_r01.zip`, same URL path (Debian's aapt can't read API 37) |
-| `sdk/r8.jar` | https://dl.google.com/android/maven2/com/android/tools/r8/8.13.25/r8-8.13.25.jar |
-| `libs/shizuku-*-13.1.5.jar` | `classes.jar` from the `dev.rikka.shizuku` api/provider/aidl/shared 13.1.5 AARs on Maven Central |
+1. **Install Shizuku** from [Google Play](https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api)
+   or its [GitHub releases](https://github.com/RikkaApps/Shizuku/releases), open it and start it
+   with **Wireless debugging** (Shizuku walks you through it; it needs Developer options turned
+   on). Start Shizuku again after each reboot of the phone.
+2. **Install XR Desk**: download the latest `xrdesk-<version>.apk` from
+   [Releases](https://github.com/ermay12/xrdesk/releases/latest) on the phone and open it. Allow
+   installing apps from your browser or file manager when asked.
+3. **Plug in the glasses, open XR Desk and tap Start.** Allow XR Desk to use Shizuku, to show
+   notifications, and to access the glasses. For the glasses, choose **Always allow**, so you
+   aren't asked again each time you plug them in.
 
-## Build and run
+Why Shizuku? Moving the glasses' picture, sending mouse input to the glasses and showing their
+keyboard on your phone all need permissions that normal apps don't get. Shizuku lets XR Desk use
+them through Android's own debugging access, without rooting the phone.
 
-```sh
-./xrdesk.sh test       # JVM unit tests
-./xrdesk.sh install    # build and install
-./xrdesk.sh start      # or open XR Desk on the phone and press Start
-./xrdesk.sh stop | pause | recenter | mouse | log
-```
+## Use
 
-The first start asks for Shizuku permission and for access to the glasses. Choose
-**Always allow** for the glasses so the question doesn't come back after replugging.
+### Stabilization
 
-The app's screen and its notification have Start/Stop, Pause and Recenter. XR Desk stops
-when the glasses are unplugged; press Start again after plugging them back in. Settings are
-listed at the top of `xrdesk.sh`.
+- **Start / Stop** turns stabilization on and off. **Pause** keeps XR Desk running but leaves the
+  picture still; **Recenter** puts it back in the middle. The notification has the same buttons.
+- **Drift back to center** is how long the picture takes to come back after you move your head,
+  in seconds; higher is slower. **Max rotation** is how far it compensates before following you.
+- **Drift back curve**: *Smooth* eases in and out, *Exponential* is fastest at first,
+  *Linear* moves at a constant speed, and *Speed up* accelerates then stops suddenly.
+- XR Desk stops when you unplug the glasses; tap Start again after plugging them back in.
 
-## Mouse screen
+### Mouse
 
-**Mouse** on the app's screen turns the phone into a mouse for the glasses, with or without
-stabilizing. Point with the top of the phone; volume down (or Center cursor) recenters the cursor.
-Right and Left click sit at the bottom left; on the right, a scroll strip (drag down to scroll
-down) above the **Type** button. The cursor freezes while a button is held, so a press doesn't
-turn into a drag, and the Mouse speed slider sets how far it moves per degree.
+Tap **Mouse**. It works with or without stabilization.
 
-**Typing:** click a text box on the glasses and Gboard opens on the phone, typing straight into
-it (with autocorrect); the controls move up above it, and typing ends when the keyboard closes.
-Back closes the keyboard (otherwise the system Back does nothing on this screen; the Back button
-at the top leaves). **Type** switches typing mode by hand, for apps that don't open the keyboard
-themselves. Android can't open the keyboard for another app's text box, so after closing it,
-click the text box again.
+- **Point** with the top edge of the phone. **Volume down** or **Center cursor** puts the cursor
+  back in the middle; **Center screen** recenters the stabilized picture.
+- **Right click** and **Left click** are at the bottom left; hold Left click and turn the phone
+  to drag. The cursor holds still while you press, so a tap doesn't become a drag.
+- **Scroll** by dragging up and down on the scroll strip. **Mouse speed** sets how far the
+  cursor moves when you turn the phone.
+- Leave with the **Back** button at the top. (The phone's own Back gesture only closes the
+  keyboard here, so you can't leave by accident.)
 
-The shell helper injects the mouse events and draws Android's arrow as a trusted overlay on the
-glasses (an untrusted layer over the click point makes Android drop the clicks). While the mouse
-screen is open, the glasses' IME policy is "fall back to the phone"; after a click, focus stays on
-the glasses for up to 0.6 s while the helper checks whether a keyboard opened (IME touch region
-and visible IME insets), then typing mode starts or focus returns to the phone.
+### Typing
+
+On the mouse screen, click a text box on the glasses and your phone's keyboard opens; type as
+usual. The buttons move up above the keyboard, and typing ends by itself when the keyboard closes
+(or press Back). After closing the keyboard, click the text box again to bring it back. **Type**
+starts typing by hand, for apps that don't open the keyboard themselves.
+
+## Known limits
+
+- Only XREAL xbx a01 and a01+ glasses are supported.
+- Phone updates may break XR Desk, since it uses parts of Android that aren't public APIs.
+- While the mouse screen is open, the glasses' keyboard appears on the phone.
+
+## Building from source
+
+See [BUILDING.md](BUILDING.md) for building, the developer workflow and how XR Desk works inside.
