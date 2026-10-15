@@ -1,39 +1,30 @@
 #!/usr/bin/env bash
 # Build, install and run XR Desk on the phone connected over adb.
 #
-#   ./xrdesk.sh build                 compile build/xrdesk.apk
-#   ./xrdesk.sh test                  run the JVM unit tests (no device needed)
-#   ./xrdesk.sh install               build and install
-#   ./xrdesk.sh start [key=value...]  start with shell access, e.g. drift=0.3 dpi=200
-#   ./xrdesk.sh options [key=value...]  save options for app-icon launches (via Shizuku) and launch
-#   ./xrdesk.sh stop
-#   ./xrdesk.sh log                   follow the app's log
+#   ./xrdesk.sh build                compile build/xrdesk.apk
+#   ./xrdesk.sh test                 run the JVM unit tests (no device needed)
+#   ./xrdesk.sh install              build and install (stops XR Desk first)
+#   ./xrdesk.sh start                start stabilizing (needs Shizuku running)
+#   ./xrdesk.sh stop                 stop; the glasses' picture goes back to normal
+#   ./xrdesk.sh pause | recenter     same as the notification buttons
+#   ./xrdesk.sh mouse                 open the mouse screen
+#   ./xrdesk.sh options [key=value...]  save settings, applied right away; none = defaults
+#   ./xrdesk.sh log                  follow the app's log
 #
-# start options (defaults in parentheses):
-#   fill      desktop size as a fraction of the screen, drawn 1:1 (1.0)
-#   width height   exact desktop size instead of fill;  dpi (240)
-#   focal     pixels the desktop slides per radian of rotation (2262)
-#   drift     seconds to drift back to center (0.5);  max  largest slide in px (600)
+# options (defaults in parentheses):
+#   focal     pixels the picture slides per radian of head rotation (2262)
+#   drift     seconds to drift back to center (1.0);  max  largest slide in px (600)
+#             (both are also set in the app, which shows max as degrees of head rotation)
+#   curve     how the picture drifts back (smooth): smooth = starts slowly, speeds up, eases into
+#             center; exp = fastest at first, then creeps; linear = constant speed; accel = speeds
+#             up, then stops suddenly. All get halfway back from the max offset in drift * 0.69 s.
+#             Also a choice in the app.
 #   predict   look-ahead in ms (8);  deadband  ignored rotation speed in rad/s (0.004)
-#   monitors  number of desktops, 1-4 (2);  swipe  updown | leftright (updown)
-#   roll      1 = roll smoothing on (0);  rollmax  largest roll correction in degrees (15)
-#             monitors/swipe/roll are also set in the menu (saved); a start option overrides the
-#             saved value for that session.
-#   flick     rad/s of a flick that switches monitors, 0 = off (2.5);  flickangle  degrees (12)
-#   flickms   time the flick must happen within (300);  cooldown  ms after a flick or shake (800)
-#   shake     rad/s of each head-shake stroke that opens the menu, 0 = off (1.5)
-#   shakeangle  degrees each stroke must cover (6);  shakecount  strokes (3);  shakems  within (1000)
-#   imu       head-rotation source: auto (glasses if attached, else phone) | xreal | phone (auto)
-#   imuswap   1 = swap which head rotation moves the desktop horizontally vs vertically
-#   imuinvx   1 = reverse horizontal sliding;  imuinvy  1 = reverse vertical sliding and flick direction
-#   imuinvroll  1 = reverse the roll correction
-#   display   display id to open XR Desk on (e.g. the glasses); default = current display
-#   inputlog  1 = log every forwarded input event (adb logcat -s XRDesk)
-# Head gestures: flick up/down (or right/left) = next/previous monitor, wrapping around; shake
-# your head ("no") = open/close the menu. The menu also opens with F12 or a controller's
-# Home/Guide button (adb: input keyevent KEYCODE_F12). The phone's Vol+ toggles stabilization,
-# its Vol- switches to the next monitor. Touch, mouse, keyboard and game controller input is
-# forwarded to the visible desktop, except while the menu is open.
+#   pointer   mouse screen: cursor pixels per radian the phone turns (focal: the cursor goes
+#             where the phone points). Also the Mouse speed slider on the mouse screen (pointer / focal).
+#   fill      picture size as a fraction of the display, 0.5-1 (1.0); below 1 leaves room to slide
+#   display   display id to stabilize (first external display)
+#   imuswap   1 = swap horizontal and vertical;  imuinvx / imuinvy  1 = reverse that direction
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -56,46 +47,34 @@ build() {
     aapt package -f -M AndroidManifest.xml -I "$SDK/android-34-res.jar" -F build/unsigned.apk
     (cd build/dex && aapt add ../unsigned.apk classes.dex)
     zipalign -f -p 4 build/unsigned.apk build/aligned.apk
-    if [ ! -f debug.keystore ]; then
-        keytool -genkeypair -keystore debug.keystore -storepass android -keypass android \
-            -alias xrdesk -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=XR Desk" >/dev/null
-    fi
     apksigner sign --ks debug.keystore --ks-pass pass:android --out "$APK" build/aligned.apk
     echo "built $APK"
 }
 
 unit_tests() {
-    # Plain-JVM tests for the device-independent code: XREAL protocol, bias filter, sample ring;
-    # head gestures, roll filter and touch mapping.
     rm -rf build/test && mkdir -p build/test
     javac --release 11 -d build/test src/com/droid/xrdesk/xreal/*.java src/com/droid/xrdesk/motion/*.java \
         test/com/droid/xrdesk/xreal/*.java test/com/droid/xrdesk/motion/*.java
     java -cp build/test com.droid.xrdesk.xreal.XrealProtocolTest
-    java -cp build/test com.droid.xrdesk.motion.MotionTest
+    java -cp build/test com.droid.xrdesk.motion.StabilizerTest
 }
 
-start() {
-    local extras=""
-    for kv in "$@"; do
-        extras+=" -e ${kv%%=*} ${kv#*=}"
-    done
-    adb shell am force-stop "$PKG"
-    adb logcat -c
-    # nohup so the desktop keeps running if this terminal or adb disconnects.
-    adb shell "nohup am instrument -w --no-hidden-api-checks$extras $PKG/.ShellInstrumentation >/dev/null 2>&1 &"
-    sleep 3
-    adb logcat -d -s XRDesk
+service_action() {
+    adb shell am startservice -n "$PKG/.StabilizerService" -a "com.droid.xrdesk.action.$1" >/dev/null
 }
 
 case "${1:-}" in
     build) build ;;
     test) unit_tests ;;
-    # Stop first: updating a visible app makes the system relaunch it mid-start.
+    # Stopping XR Desk makes the helper put the display back before the update.
     install) build && adb shell am force-stop "$PKG" && adb install -r "$APK" ;;
-    start) shift; start "$@" ;;
-    options) shift; adb shell am force-stop "$PKG" &&
-        adb shell "am start -n $PKG/.LaunchActivity --es options '$*'" ;;
+    start) adb shell am start -n "$PKG/.MainActivity" --display 0 --ez start true >/dev/null
+        sleep 3; adb logcat -d -s XRDesk | tail -20 ;;
     stop) adb shell am force-stop "$PKG" ;;
+    pause) service_action PAUSE ;;
+    mouse) adb shell am start -n "$PKG/.MainActivity" --display 0 --ez mouse true >/dev/null ;;
+    recenter) service_action RECENTER ;;
+    options) shift; adb shell "am start -n $PKG/.MainActivity --display 0 --es options '$*'" >/dev/null ;;
     log) adb logcat -s XRDesk ;;
-    *) sed -n '2,36p' "$0"; exit 1 ;;
+    *) sed -n '2,/^set -euo/p' "$0" | grep '^#'; exit 1 ;;
 esac

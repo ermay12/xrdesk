@@ -5,27 +5,35 @@
     android:versionName="0.1">
 
     <uses-sdk android:minSdkVersion="34" android:targetSdkVersion="35" />
-    <!-- Optional: XREAL glasses' IMU over USB host (XrealImuSource). -->
+    <!-- XREAL glasses' IMU over USB host (XrealImuSource). -->
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <!-- Shizuku client (from the dev.rikka.shizuku:provider AAR manifest). -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- Install-time permission that satisfies the connectedDevice foreground service prerequisite. -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application android:label="XR Desk" android:debuggable="true">
-        <!-- App icon: gets shell access through Shizuku, then shows DesktopActivity. -->
-        <activity android:name=".LaunchActivity"
+        <activity android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".DesktopActivity"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|touchscreen"
-            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+
+        <activity android:name=".MouseActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <service android:name=".StabilizerService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <!-- Shizuku delivers its binder to the app through this provider. -->
         <provider android:name="rikka.shizuku.ShizukuProvider"
@@ -36,9 +44,4 @@
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
         <meta-data android:name="moe.shizuku.client.V3_SUPPORT" android:value="true" />
     </application>
-
-    <!-- Started over adb so the app runs with the shell's permissions. -->
-    <instrumentation android:name=".ShellInstrumentation"
-        android:targetPackage="com.droid.xrdesk"
-        android:label="XR Desk shell access" />
 </manifest>

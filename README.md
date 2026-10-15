@@ -1,17 +1,27 @@
 # XR Desk
 
-Proof-of-concept stabilized desktop for XR glasses on Android. XR Desk hosts 1–4 real Android
-desktops (virtual displays) in its own window and slides them against head motion, always
-drifting back to center. Head motion comes from the XREAL xbx a01+ IMU, or the phone's gyro.
-Tested on a Pixel 9a running Android 17; not yet tested with the glasses.
+Stabilizes the whole picture of XREAL xbx a01/a01+ glasses on Android. Apps run normally on
+the glasses' desktop; XR Desk shifts the display's output against small head movements, so
+the picture seems to stay put, and lets it drift back to center. Windows, taskbar and mouse
+cursor all move together, and nothing is redrawn. It also turns the phone into a mouse and
+keyboard for the glasses. Tested on a Pixel 9a running Android 17.
 
-## One-time setup (this Linux VM)
+## How it works
+
+- `StabilizerService` (foreground service) reads the glasses' IMU over USB (`XrealImuSource`)
+  and turns head rotation into an offset (`motion/Stabilizer`), once per frame.
+- `ProjectionHelper` runs as the shell user through Shizuku. It moves the display rect of the
+  glasses' SurfaceFlinger projection by that offset, and puts the original back when the app
+  stops or dies.
+
+## Setup (this Linux VM)
 
 ```sh
-sudo apt-get install -y --no-install-recommends adb openjdk-21-jdk-headless aapt apksigner zipalign unzip curl
+sudo apt-get install -y --no-install-recommends adb openjdk-21-jdk-headless aapt apksigner zipalign
 ```
 
-Builds need about 2 GB of free RAM. `sdk/` and `libs/` are already in place. To recreate them:
+`sdk/` and `libs/` are checked in. Builds need about 2 GB of free RAM. On the phone, Shizuku
+must be running (start it again after each reboot). To recreate `sdk/` and `libs/`:
 
 | File | Source |
 |---|---|
@@ -20,49 +30,39 @@ Builds need about 2 GB of free RAM. `sdk/` and `libs/` are already in place. To 
 | `sdk/r8.jar` | https://dl.google.com/android/maven2/com/android/tools/r8/8.13.25/r8-8.13.25.jar |
 | `libs/shizuku-*-13.1.5.jar` | `classes.jar` from the `dev.rikka.shizuku` api/provider/aidl/shared 13.1.5 AARs on Maven Central |
 
-## Connect to the phone
-
-Turn on **Developer options → Wireless debugging**. Pair once with **Pair device with pairing
-code**; use split screen, because the code popup closes if you switch apps. The VM's gateway
-address is the phone.
+## Build and run
 
 ```sh
-PHONE=$(ip route | awk '/default/{print $3}')
-adb pair $PHONE:<pairing-port> <code>   # once
-adb connect $PHONE:<port>               # port shown on the Wireless debugging screen
+./xrdesk.sh test       # JVM unit tests
+./xrdesk.sh install    # build and install
+./xrdesk.sh start      # or open XR Desk on the phone and press Start
+./xrdesk.sh stop | pause | recenter | mouse | log
 ```
 
-## Build and deploy
+The first start asks for Shizuku permission and for access to the glasses. Choose
+**Always allow** for the glasses so the question doesn't come back after replugging.
 
-```sh
-./xrdesk.sh test                  # JVM unit tests, no phone needed
-./xrdesk.sh install               # build, stop the app, install
-./xrdesk.sh start [key=value...]  # start with shell access over adb
-./xrdesk.sh stop | log
-```
+The app's screen and its notification have Start/Stop, Pause and Recenter. XR Desk stops
+when the glasses are unplugged; press Start again after plugging them back in. Settings are
+listed at the top of `xrdesk.sh`.
 
-Or tap the XR Desk icon. This needs Shizuku running, and the first launch asks for Shizuku
-permission. Save options for icon launches with `./xrdesk.sh options key=value...`. All options
-are listed at the top of `xrdesk.sh`.
+## Mouse screen
 
-Installing restarts XR Desk, and apps on its desktops move to the phone screen. If this Terminal
-is running on an XR desktop, move it to the phone screen first so the VM isn't interrupted:
-`adb shell am display move-stack <terminal-task-id> 0`.
+**Mouse** on the app's screen turns the phone into a mouse for the glasses, with or without
+stabilizing. Point with the top of the phone; volume down (or Center cursor) recenters the cursor.
+Right and Left click sit at the bottom left; on the right, a scroll strip (drag down to scroll
+down) above the **Type** button. The cursor freezes while a button is held, so a press doesn't
+turn into a drag, and the Mouse speed slider sets how far it moves per degree.
 
-## Controls
+**Typing:** click a text box on the glasses and Gboard opens on the phone, typing straight into
+it (with autocorrect); the controls move up above it, and typing ends when the keyboard closes.
+Back closes the keyboard (otherwise the system Back does nothing on this screen; the Back button
+at the top leaves). **Type** switches typing mode by hand, for apps that don't open the keyboard
+themselves. Android can't open the keyboard for another app's text box, so after closing it,
+click the text box again.
 
-- **Head flick** up/down (or left/right, set in the menu): next/previous monitor.
-- **Head shake** ("no"), **F12**, or a controller's **Home** button: settings menu (monitors, swipe direction, roll smoothing).
-- **Phone Vol+**: stabilization on/off. **Vol−**: next monitor.
-- Touch, mouse, keyboard and controller input go to the visible desktop.
-
-## Code
-
-- `src/com/droid/xrdesk/`
-  - `DesktopActivity`: desktops, stabilization, input forwarding
-  - `SettingsMenu`
-  - `XrealImuSource`
-  - `ShellInstrumentation`: borrows shell permissions
-  - `LaunchActivity` and `ShellLaunchService`: Shizuku launch
-- `motion/` and `xreal/`: plain-Java logic, tested in `test/`
-- `NOTES-xreal.md` and `NOTES-menu.md`: protocol sources, design decisions, test logs
+The shell helper injects the mouse events and draws Android's arrow as a trusted overlay on the
+glasses (an untrusted layer over the click point makes Android drop the clicks). While the mouse
+screen is open, the glasses' IME policy is "fall back to the phone"; after a click, focus stays on
+the glasses for up to 0.6 s while the helper checks whether a keyboard opened (IME touch region
+and visible IME insets), then typing mode starts or focus returns to the phone.
