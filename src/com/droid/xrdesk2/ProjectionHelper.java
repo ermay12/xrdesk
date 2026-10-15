@@ -50,6 +50,8 @@ public class ProjectionHelper extends Binder {
     static final int KEYBOARD_ON_PHONE = FIRST_CALL_TRANSACTION + 8;
     /** Oneway. In: int display id whose top task gets input focus. */
     static final int FOCUS_DISPLAY = FIRST_CALL_TRANSACTION + 9;
+    /** Out: boolean: a keyboard is showing (anywhere). */
+    static final int KEYBOARD_SHOWING = FIRST_CALL_TRANSACTION + 10;
     private static final int IME_POLICY_FALLBACK_DISPLAY = 1;  // WindowManager.DISPLAY_IME_POLICY_FALLBACK_DISPLAY
     /** Reserved by Shizuku: sent when the service should exit. */
     private static final int TRANSACTION_DESTROY = 16777114;
@@ -120,6 +122,13 @@ public class ProjectionHelper extends Binder {
                 data.enforceInterface(DESCRIPTOR);
                 MousePointer.focusDisplay(data.readInt());
                 return true;
+            case KEYBOARD_SHOWING: {
+                data.enforceInterface(DESCRIPTOR);
+                boolean showing = keyboardShowing();
+                reply.writeNoException();
+                reply.writeBoolean(showing);
+                return true;
+            }
             case MOUSE_SHOW:
             case MOUSE_MOVE:
             case MOUSE_BUTTON:
@@ -301,6 +310,61 @@ public class ProjectionHelper extends Binder {
             Log.e(TAG, "helper: couldn't change the keyboard policy", e);
             return false;
         }
+    }
+
+    private Object mWindowManager;
+    private Method mImeTouchRegion;
+
+    private Method mImeDisplay;
+    private Method mWindowInsets;
+    private String mLastKeyboardState = "";
+
+    /**
+     * A keyboard is showing if its window has a touchable region and its insets source is
+     * visible. The region alone can stay set when Android starts showing the keyboard and then
+     * aborts (as when focus comes back to an app whose text box still has the cursor).
+     */
+    private boolean keyboardShowing() {
+        try {
+            if (mImeTouchRegion == null) {
+                IBinder binder = (IBinder) Class.forName("android.os.ServiceManager")
+                        .getMethod("getService", String.class).invoke(null, "window");
+                mWindowManager = Class.forName("android.view.IWindowManager$Stub")
+                        .getMethod("asInterface", IBinder.class).invoke(null, binder);
+                Class<?> wm = mWindowManager.getClass();
+                mImeTouchRegion = wm.getMethod("getCurrentImeTouchRegion");
+                mImeDisplay = wm.getMethod("getImeDisplayId");
+                mWindowInsets = wm.getMethod("getWindowInsets", int.class, IBinder.class,
+                        Class.forName("android.view.InsetsState"));
+            }
+            boolean region = !((android.graphics.Region) mImeTouchRegion.invoke(mWindowManager)).isEmpty();
+            boolean visible = region && imeInsetsVisible((int) mImeDisplay.invoke(mWindowManager));
+            String state = "region " + region + ", insets visible " + visible;
+            if (!state.equals(mLastKeyboardState)) {
+                Log.i(TAG, "helper: keyboard " + state);
+                mLastKeyboardState = state;
+            }
+            return visible;
+        } catch (Throwable e) {
+            Log.w(TAG, "helper: keyboard state unknown: " + e);
+            return false;
+        }
+    }
+
+    /** Whether the display's IME insets source is visible (from its InsetsState). */
+    private boolean imeInsetsVisible(int displayId) throws ReflectiveOperationException {
+        Object state = Class.forName("android.view.InsetsState").getConstructor().newInstance();
+        mWindowInsets.invoke(mWindowManager, displayId, null, state);
+        int ime = android.view.WindowInsets.Type.ime();
+        Class<?> c = state.getClass();
+        int n = (int) c.getMethod("sourceSize").invoke(state);
+        for (int i = 0; i < n; i++) {
+            Object source = c.getMethod("sourceAt", int.class).invoke(state, i);
+            if ((int) source.getClass().getMethod("getType").invoke(source) == ime) {
+                return (boolean) source.getClass().getMethod("isVisible").invoke(source);
+            }
+        }
+        return false;
     }
 
     private synchronized void restore() {

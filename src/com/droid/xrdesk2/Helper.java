@@ -121,6 +121,22 @@ final class Helper {
         }
     }
 
+    /** True while a keyboard is showing. */
+    boolean keyboardShowing() {
+        Parcel data = start();
+        Parcel reply = Parcel.obtain();
+        try {
+            mBinder.transact(ProjectionHelper.KEYBOARD_SHOWING, data, reply, 0);
+            reply.readException();
+            return reply.readBoolean();
+        } catch (RemoteException | RuntimeException e) {
+            return false;
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
     /** Gives input focus to a display's top task. */
     void focusDisplay(int displayId) {
         Parcel data = start();
