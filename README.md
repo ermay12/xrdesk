@@ -1,22 +1,29 @@
 # XR Desk
 
-A steady screen for XREAL glasses on Android, plus your phone as a mouse and keyboard.
+This android app enables advanced screen stabilization for the XReal XBX A01+ XR glasses as well as pointer based mouse and keyboard control.
 
-Display glasses show a screen that's fixed to your head, so every small head movement drags the
-whole picture along. XR Desk keeps the picture still against small movements and lets it drift
-gently back to center, so it feels more like a monitor in front of you. Your apps keep running
-normally on the glasses' desktop; XR Desk moves the whole picture (windows, taskbar and cursor)
-without redrawing anything.
+> [!NOTE]
+> This app was completely vibecoded by Opus 5.5. I only provided design direction and testing.
 
-<p>
-  <img src="docs/main-screen.png" width="270" alt="Main screen: Stop, Pause, Recenter and Mouse, the drift time, max rotation and drift curve">
-  <img src="docs/mouse-screen.png" width="270" alt="Mouse screen: Back, Center cursor, Center screen, mouse speed, Right and Left click, the scroll strip and Type">
-</p>
+## Demos
+
+### Stabilization
+
+<video src="docs/stabilization-demo.mov" width="640" alt="A demo video of screen stabilization enabled" controls></video>
+
+### 3DoF Mouse and Keyboard Control
+
+<video src="docs/mouse-demo.mov" width="640" alt="A demo video of the mouse pointer and keyboard working" controls></video>
+
+### Screenshots
+
+<img src="docs/main-screen.png" width="270" alt="Main screen: Stop, Pause, Recenter and Mouse, the drift time, max rotation and drift curve">
+<img src="docs/mouse-screen.png" width="270" alt="Mouse screen: Back, Center cursor, Center screen, mouse speed, Right and Left click, the scroll strip and Type">
 
 ## Features
 
 - **Stabilization**: the picture stays put when you move your head a little, then drifts back
-  to center. You choose how fast it drifts back, how far it compensates, and the drift curve.
+  to center.
 - **Phone as a mouse**: point the top of the phone at the glasses' screen to move the cursor;
   left click, right click, drag and scroll.
 - **Phone as a keyboard**: click a text box on the glasses and your phone's keyboard opens,
@@ -57,8 +64,8 @@ them through Android's own debugging access, without rooting the phone.
   picture still; **Recenter** puts it back in the middle. The notification has the same buttons.
 - **Drift back to center** is how long the picture takes to come back after you move your head,
   in seconds; higher is slower. **Max rotation** is how far it compensates before following you.
-- **Drift back curve**: *Smooth* eases in and out, *Exponential* is fastest at first,
-  *Linear* moves at a constant speed, and *Speed up* accelerates then stops suddenly.
+- **Drift back curve**: _Smooth_ eases in and out, _Exponential_ is fastest at first,
+  _Linear_ moves at a constant speed, and _Speed up_ accelerates then stops suddenly.
 - XR Desk stops when you unplug the glasses; tap Start again after plugging them back in.
 
 ### Mouse
