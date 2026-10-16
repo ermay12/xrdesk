@@ -90,3 +90,10 @@ starts typing by hand, for apps that don't open the keyboard themselves.
 ## Building from source
 
 See [BUILDING.md](BUILDING.md) for building, the developer workflow and how XR Desk works inside.
+
+## License
+
+XR Desk is free software under the [GNU General Public License v3.0](LICENSE) or later: you can
+use, study, change and share it, and if you distribute a changed version, you must share its
+source under the same license. The APK includes the
+[Shizuku API library](https://github.com/RikkaApps/Shizuku-API) (Apache License 2.0).

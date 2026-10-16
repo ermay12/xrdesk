@@ -8,10 +8,13 @@ XR Desk builds without Gradle or Android Studio, using plain command-line tools.
 Ubuntu:
 
 ```sh
-sudo apt-get install -y --no-install-recommends adb openjdk-21-jdk-headless aapt apksigner zipalign
+sudo apt-get install -y --no-install-recommends adb openjdk-21-jdk-headless aapt apksigner zipalign curl unzip
+./xrdesk.sh setup                 # once: downloads sdk/ and libs/ (about 150 MB) and checks them
 ```
 
-Builds need about 2 GB of free RAM. `sdk/` and `libs/` are checked in; to recreate them:
+Builds need about 2 GB of free RAM. `sdk/` and `libs/` aren't in the repo (Google's SDK license
+doesn't allow redistributing `android.jar`); `setup` fetches them from where they're published
+and checks their SHA-256 sums:
 
 | File | Source |
 |---|---|
