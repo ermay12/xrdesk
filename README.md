@@ -3,17 +3,21 @@
 This android app enables advanced screen stabilization for the XReal XBX A01+ XR glasses as well as pointer based mouse and keyboard control.
 
 > [!NOTE]
-> This app was completely vibecoded by Opus 5.5. I only provided design direction and testing.
+> This app was completely vibecoded by Opus 5.5.
+>
+> I only provided design direction and testing.
 
 ## Demos
 
 ### Stabilization
 
-<video src="docs/stabilization-demo.mov" width="640" alt="A demo video of screen stabilization enabled" controls></video>
+[![Watch the demo](https://img.youtube.com/vi/kCf_8hHDI9E/maxresdefault.jpg)](https://www.youtube.com/watch?v=kCf_8hHDI9E)
 
 ### 3DoF Mouse and Keyboard Control
 
-<video src="docs/mouse-demo.mov" width="640" alt="A demo video of the mouse pointer and keyboard working" controls></video>
+Note that the mouse cursor looks normal in the glasses, but doesn't show up in screen recordings, so enabled some developer tool settings to allow you to see where the mouse would be.
+
+[![Watch the demo](https://img.youtube.com/vi/WlOdrEsqxr8/maxresdefault.jpg)](https://www.youtube.com/watch?v=WlOdrEsqxr8)
 
 ### Screenshots
 
