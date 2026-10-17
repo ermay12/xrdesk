@@ -131,5 +131,6 @@ All from the shell helper, which isn't subject to hidden API restrictions: `Disp
 | `src/com/droid/xrdesk/motion/Stabilizer.java` | Head rotation to picture offset, drift curves |
 | `src/com/droid/xrdesk/xreal/` | XREAL protocol, gyro bias filter, sample ring |
 | `src/com/droid/xrdesk/Options.java` | Settings, one `key=value` string |
+| `res/` | The app icon (an adaptive icon of vector drawables: the xbx a01's front) |
 | `test/` | JVM tests for `motion/` and `xreal/` |
 | `xrdesk.sh` | Build, install, run, release |

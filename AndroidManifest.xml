@@ -18,7 +18,7 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- Debuggable only in development builds (xrdesk.sh build passes aapt debug mode). -->
-    <application android:label="XR Desk">
+    <application android:label="XR Desk" android:icon="@mipmap/ic_launcher">
         <activity android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"

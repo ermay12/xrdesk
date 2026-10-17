@@ -97,7 +97,7 @@ build() {
     # aapt is too old to read the API 37 resource table; attribute IDs are stable.
     local debug=--debug-mode
     [ "$mode" = release ] && debug=
-    aapt package -f $debug -M AndroidManifest.xml -I "$SDK/android-34-res.jar" -F build/unsigned.apk
+    aapt package -f $debug -M AndroidManifest.xml -S res -I "$SDK/android-34-res.jar" -F build/unsigned.apk
     (cd build/dex && aapt add ../unsigned.apk classes.dex)
     zipalign -f -p 4 build/unsigned.apk build/aligned.apk
     if [ "$mode" = release ]; then
