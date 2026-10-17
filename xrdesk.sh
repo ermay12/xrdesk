@@ -15,15 +15,20 @@
 #
 # options (defaults in parentheses):
 #   focal     pixels the picture slides per radian of head rotation (2262)
-#   drift     seconds to drift back to center (1.0);  max  largest slide in px (600)
-#             (both are also set in the app, which shows max as degrees of head rotation)
-#   curve     how the picture drifts back (smooth): smooth = starts slowly, speeds up, eases into
+#   drift     seconds to drift back to center (1.0)
+#   maxyaw    largest sideways slide in px (max);  maxpitch  largest up and down slide in px (max)
+#   max       both of those at once (600). drift, maxyaw and maxpitch are also set in the app,
+#             which shows the max slides as degrees of head rotation.
+#   curve     how the picture drifts back (accel): smooth = starts slowly, speeds up, eases into
 #             center; exp = fastest at first, then creeps; linear = constant speed; accel = speeds
-#             up, then stops suddenly. All get halfway back from the max offset in drift * 0.69 s.
-#             Also a choice in the app.
+#             up, then stops suddenly. All get halfway back from the larger max offset in
+#             drift * 0.69 s. Also a choice in the app.
 #   predict   look-ahead in ms (8);  deadband  ignored rotation speed in rad/s (0.004)
-#   pointer   mouse screen: cursor pixels per radian the phone turns (focal: the cursor goes
-#             where the phone points). Also the Mouse speed slider on the mouse screen (pointer / focal).
+#   pointerx  mouse screen: cursor pixels per radian the phone turns sideways (pointer)
+#   pointery  and tilts up or down (pointer). Also the mouse speed sliders (pointerx / focal).
+#   pointer   both of those at once (focal: the cursor goes where the phone points)
+#   scroll    mouse screen: scroll speed, wheel notches per 0.15 in dragged on the scroll strip (1.0)
+#   scrollinv 1 = drag down to scroll up, like a touch screen (0). Both also set in the app.
 #   fill      picture size as a fraction of the display, 0.5-1 (1.0); below 1 leaves room to slide
 #   display   display id to stabilize (first external display)
 #   imuswap   1 = swap horizontal and vertical;  imuinvx / imuinvy  1 = reverse that direction
@@ -46,7 +51,7 @@ SUMS='cacbe3424c397500d0061159c61302dbfd83c7e2585474b99d3a3e4c71a7133f  sdk/andr
 8557b8c715d374f8da18e148ca5b971d1c7435e91447e6d4f7664403c7328760  libs/shizuku-shared-13.1.5.jar'
 
 setup() {
-    if echo "$SUMS" | sha256sum -c --quiet >/dev/null 2>&1; then
+    if echo "$SUMS" | sha256sum -c --quiet - >/dev/null 2>&1; then
         echo "sdk/ and libs/ are already set up"
         return
     fi
@@ -67,7 +72,7 @@ setup() {
         unzip -p "$tmp/$n.aar" classes.jar > "libs/shizuku-$n-13.1.5.jar"
     done
     rm -rf "$tmp"
-    echo "$SUMS" | sha256sum -c
+    echo "$SUMS" | sha256sum -c -
 }
 
 # build [release]: a debuggable APK signed with debug.keystore, or a release APK signed with the
@@ -83,7 +88,7 @@ build() {
     mkdir -p build/classes build/dex
     # libs/ holds the Shizuku client library (classes.jar from its Maven Central AARs).
     local libs
-    libs=$(ls libs/*.jar | paste -sd:)
+    libs=$(ls libs/*.jar | paste -sd: -)
     javac --release 11 -classpath "$SDK/android.jar:$libs" \
         -d build/classes $(find src -name '*.java')
     (cd build/classes && jar cf ../classes.jar .)

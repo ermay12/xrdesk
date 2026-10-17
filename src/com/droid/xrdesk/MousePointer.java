@@ -33,11 +33,20 @@ import java.lang.reflect.Method;
  * <p>A click moves input focus to the clicked window's display (and brings the window to the
  * front); after the last button is released, focus goes back to {@code homeDisplay} (where the
  * mouse screen is) so the phone's volume keys keep reaching the app.
+ *
+ * <p>Android moves focus a little after the press (about 30 ms later on an emulator), and a text
+ * box asks for the keyboard on release only if its window has focus by then; otherwise no
+ * keyboard opens, except sometimes the first time. So when a press lands on this display while
+ * focus is elsewhere (on the phone), the release waits for focus to arrive here and settle,
+ * up to FOCUS_WAIT_MAX_MS after the press: short of a long press.
  */
 final class MousePointer {
     private static final String TAG = ProjectionHelper.TAG;
     private static final int DRAWN_SIZE = 40;    // fallback arrow, px; about 34 px tall
     private static final int DRAWN_HOTSPOT = 3;  // its tip, from the top-left
+    private static final long FOCUS_WAIT_MAX_MS = 300;  // Android's long press starts at 400 ms
+    private static final long FOCUS_SETTLE_MS = 80;     // from the window manager to the window (~30 ms seen)
+    private static final long FOCUS_POLL_MS = 5;
 
     private final int mDisplayId;
     private final int mLayerStack;
@@ -58,7 +67,8 @@ final class MousePointer {
     private boolean mShown;
     private boolean mHovering;
     private int mButtons;
-    private long mDownTime;
+    private volatile long mDownTime;
+    private volatile long mFocusedAtMs;  // when focus reached this display after a press; 0 = not yet
     private float mX;
     private float mY;
 
@@ -132,6 +142,7 @@ final class MousePointer {
             if (mButtons == 0) {
                 mDownTime = SystemClock.uptimeMillis();
                 mButtons = button;
+                watchFocus(mDownTime);
                 inject(MotionEvent.ACTION_DOWN, mDownTime, 0, 0f);
             } else {
                 mButtons |= button;
@@ -141,6 +152,7 @@ final class MousePointer {
             mButtons &= ~button;
             inject(MotionEvent.ACTION_BUTTON_RELEASE, mDownTime, button, 0f);
             if (mButtons == 0) {
+                waitForFocus();
                 inject(MotionEvent.ACTION_UP, mDownTime, 0, 0f);
                 hover(MotionEvent.ACTION_HOVER_ENTER);
                 if (homeDisplay >= 0) {
@@ -206,6 +218,49 @@ final class MousePointer {
             ev.recycle();
         } catch (Throwable e) {
             Log.e(TAG, "mouse: inject failed", e);
+        }
+    }
+
+    /** At a press: notes when input focus is (or, polling, gets) on this display. */
+    private void watchFocus(long downTime) {
+        if (focusedHere()) {
+            mFocusedAtMs = downTime - FOCUS_SETTLE_MS;  // already there: nothing to wait for
+            return;
+        }
+        mFocusedAtMs = 0;
+        new Thread(() -> {
+            while (mDownTime == downTime && SystemClock.uptimeMillis() < downTime + FOCUS_WAIT_MAX_MS) {
+                if (focusedHere()) {
+                    mFocusedAtMs = SystemClock.uptimeMillis();
+                    return;
+                }
+                SystemClock.sleep(FOCUS_POLL_MS);
+            }
+        }, "xrdesk-focus").start();
+    }
+
+    /** Before a release: until focus has settled on this display, or FOCUS_WAIT_MAX_MS after the press. */
+    private void waitForFocus() {
+        long deadline = mDownTime + FOCUS_WAIT_MAX_MS;
+        while (mFocusedAtMs == 0 && SystemClock.uptimeMillis() < deadline) {
+            SystemClock.sleep(FOCUS_POLL_MS);
+        }
+        long settled = mFocusedAtMs == 0 ? deadline : Math.min(deadline, mFocusedAtMs + FOCUS_SETTLE_MS);
+        long wait = settled - SystemClock.uptimeMillis();
+        if (wait > 0) {
+            Log.i(TAG, "mouse: release waits " + wait + " ms for focus");
+            SystemClock.sleep(wait);
+        }
+    }
+
+    /** Whether the window manager's focused task is on this display. Unknown counts as yes. */
+    private boolean focusedHere() {
+        try {
+            Object atm = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null);
+            Object task = atm.getClass().getMethod("getFocusedRootTaskInfo").invoke(atm);
+            return task == null || task.getClass().getField("displayId").getInt(task) == mDisplayId;
+        } catch (Throwable e) {
+            return true;
         }
     }
 

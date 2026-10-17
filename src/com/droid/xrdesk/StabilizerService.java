@@ -427,7 +427,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     /** Stab thread. Applies the current settings. */
     private void configure() {
         Options o = mOptions;
-        mStabilizer.configure(o.focal, o.drift, o.max, o.predictMs / 1000f, o.deadband, o.curve);
+        mStabilizer.configure(o.focal, o.drift, o.maxYaw, o.maxPitch, o.predictMs / 1000f, o.deadband, o.curve);
     }
 
     /** Stab thread. Back to center (also used when pausing, resuming or losing the IMU). */

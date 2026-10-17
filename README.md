@@ -69,30 +69,35 @@ them through Android's own debugging access, without rooting the phone.
 - **Start / Stop** turns stabilization on and off. **Pause** keeps XR Desk running but leaves the
   picture still; **Recenter** puts it back in the middle. The notification has the same buttons.
 - **Drift back to center** is how long the picture takes to come back after you move your head,
-  in seconds; higher is slower. **Max rotation** is how far it compensates before following you.
-- **Drift back curve**: _Smooth_ eases in and out, _Exponential_ is fastest at first,
-  _Linear_ moves at a constant speed, and _Speed up_ accelerates then stops suddenly.
+  in seconds; higher is slower. **Max side-to-side rotation (yaw)** and **Max up-and-down
+  rotation (pitch)** are how far it compensates in each direction before following you.
+- **Drift back curve**: _Speed up_ (the default) accelerates then stops suddenly, _Smooth_ eases
+  in and out, _Exponential_ is fastest at first, and _Linear_ moves at a constant speed.
 - XR Desk stops when you unplug the glasses; tap Start again after plugging them back in.
 
 ### Mouse
 
-Tap **Mouse**. It works with or without stabilization.
+Tap **Mouse**, the big button at the bottom of the screen, easy to find with your thumb while
+wearing the glasses. It works with or without stabilization.
 
 - **Point** with the top edge of the phone. **Volume down** or **Center cursor** puts the cursor
   back in the middle; **Center screen** recenters the stabilized picture.
 - **Right click** and **Left click** are at the bottom left; hold Left click and turn the phone
   to drag. The cursor holds still while you press, so a tap doesn't become a drag.
-- **Scroll** by dragging up and down on the scroll strip. **Mouse speed** sets how far the
-  cursor moves when you turn the phone.
+- **Scroll** by dragging up and down on the scroll strip: drag down to scroll down, like a scroll
+  bar, or switch on **Reverse scroll direction** to drag the page like a touch screen.
+- The two **Mouse speed** sliders set how far the cursor moves when you turn the phone side to
+  side and when you tilt it up and down; **Scroll speed** sets how far a drag scrolls.
 - Leave with the **Back** button at the top. (The phone's own Back gesture only closes the
   keyboard here, so you can't leave by accident.)
 
 ### Typing
 
-On the mouse screen, click a text box on the glasses and your phone's keyboard opens; type as
-usual. The buttons move up above the keyboard, and typing ends by itself when the keyboard closes
-(or press Back). After closing the keyboard, click the text box again to bring it back. **Type**
-starts typing by hand, for apps that don't open the keyboard themselves.
+On the mouse screen, click a text box on the glasses and your phone's keyboard opens, with a short
+buzz so you know without looking; type as usual. The buttons fill the space above the keyboard,
+and typing ends by itself when the keyboard closes (or press Back). After closing the keyboard,
+click the text box again to bring it back. **Type** starts typing by hand, for apps that don't
+open the keyboard themselves.
 
 ## Known limits
 

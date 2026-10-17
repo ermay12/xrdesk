@@ -10,31 +10,38 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
+import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
+import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import rikka.shizuku.Shizuku;
 
 /**
  * The app's screen: shows the stabilizer's status and starts, pauses, recenters and stops it,
- * with a number box for the drift time, a slider for the largest compensated rotation and a
- * choice of drift curve (all applied right away).
+ * with a number box for the drift time, sliders for the largest compensated rotation sideways and
+ * up and down, and a drop-down of drift curves (all applied right away). The Mouse button is
+ * pinned to the bottom and large, to find with a thumb while wearing the glasses.
  * Starting asks for Shizuku permission the first time. Over adb:
  *   am start -n com.droid.xrdesk/.MainActivity --ez start true [--es options "key=value ..."]
  */
 public class MainActivity extends Activity {
     private static final int SHIZUKU_REQUEST = 1;
     private static final int NOTIFICATION_REQUEST = 2;
+    private static final float MOUSE_BUTTON_HEIGHT_IN = 1f;
     // Drift curves, indexed by the Stabilizer constant: saved names and labels.
     private static final String[] CURVE_NAMES = {"smooth", "exp", "linear", "accel"};
     private static final String[] CURVE_LABELS = {
@@ -52,10 +59,11 @@ public class MainActivity extends Activity {
     private Button mRecenter;
     private TextView mDriftLabel;
     private EditText mDriftInput;
-    private TextView mMaxLabel;
-    private SeekBar mMax;
-    private RadioGroup mCurve;
-    private boolean mLoading;  // showing saved settings, not a user change
+    private TextView mYawLabel;
+    private SeekBar mYaw;
+    private TextView mPitchLabel;
+    private SeekBar mPitch;
+    private Spinner mCurve;
     private boolean mStartWhenReady;
 
     private final Shizuku.OnRequestPermissionResultListener mPermissionListener = (requestCode, result) -> {
@@ -87,14 +95,19 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
+        // The settings scroll; the Mouse button stays at the bottom below them.
+        LinearLayout screen = new LinearLayout(this);
+        screen.setOrientation(LinearLayout.VERTICAL);
+        screen.setBackgroundColor(Color.BLACK);
+        screen.setOnApplyWindowInsetsListener((v, insets) -> {
             // Edge to edge: keep clear of the status and navigation bars.
             Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-            v.setPadding(48 + bars.left, 48 + bars.top, 48 + bars.right, 48 + bars.bottom);
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
             return insets;
         });
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(48, 48, 48, 32);
         root.setBackgroundColor(Color.BLACK);
         TextView title = text("XR Desk", 28);
         mStatus = text("", 18);
@@ -108,7 +121,11 @@ public class MainActivity extends Activity {
         });
         mPause = button("Pause", v -> send(StabilizerService.ACTION_PAUSE));
         mRecenter = button("Recenter", v -> send(StabilizerService.ACTION_RECENTER));
-        Button mouse = button("Mouse", v -> startActivity(new Intent(this, MouseActivity.class)));
+        Button mouse = button("Mouse", v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            startActivity(new Intent(this, MouseActivity.class));
+        });
+        mouse.setTextSize(24);
         mDriftLabel = text("Drift back to center, in seconds (higher = slower)", 16);
         mDriftLabel.setPadding(0, 48, 0, 8);
         mDriftInput = new EditText(this);
@@ -135,28 +152,44 @@ public class MainActivity extends Activity {
         });
         // Lets the box give up focus, and keeps the keyboard from opening when the screen does.
         root.setFocusableInTouchMode(true);
-        mMaxLabel = text("", 16);
-        mMaxLabel.setPadding(0, 32, 0, 8);
-        mMax = slider(2, 30, degrees -> {
-            Options.put(this, "max", String.valueOf(Math.round(Math.toRadians(degrees) * Options.load(this).focal)));
-            showMax(degrees);
-            send(StabilizerService.ACTION_RELOAD);
+        mYawLabel = text("", 16);
+        mYawLabel.setPadding(0, 32, 0, 8);
+        mYaw = slider(2, 30, yaw -> {
+            saveMax("maxyaw", yaw);
+            showMax(yaw, degrees(Options.load(this).maxPitch));
+        });
+        mPitchLabel = text("", 16);
+        mPitchLabel.setPadding(0, 32, 0, 8);
+        mPitch = slider(2, 30, pitch -> {
+            saveMax("maxpitch", pitch);
+            showMax(degrees(Options.load(this).maxYaw), pitch);
         });
         TextView curveLabel = text("Drift back curve", 16);
         curveLabel.setPadding(0, 32, 0, 8);
-        mCurve = new RadioGroup(this);
-        for (int i = 0; i < CURVE_LABELS.length; i++) {
-            RadioButton b = new RadioButton(this);
-            b.setId(i + 1);  // RadioGroup ids must be positive: curve + 1
-            b.setText(CURVE_LABELS[i]);
-            b.setTextSize(16);
-            b.setTextColor(Color.WHITE);
-            mCurve.addView(b);
-        }
-        mCurve.setOnCheckedChangeListener((group, id) -> {
-            if (!mLoading && id > 0) {
-                Options.put(this, "curve", CURVE_NAMES[id - 1]);
-                send(StabilizerService.ACTION_RELOAD);
+        mCurve = new Spinner(this, Spinner.MODE_DROPDOWN);  // the list is as wide as its longest line
+        mCurve.setAdapter(new ArrayAdapter<String>(this, 0, CURVE_LABELS) {
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                return curveRow(position, convertView, 0);
+            }
+
+            @Override
+            public View getDropDownView(int position, View convertView, ViewGroup parent) {
+                return curveRow(position, convertView, 40);
+            }
+        });
+        mCurve.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                // Also called after loadSliders shows the saved curve: only a change is saved.
+                if (position != Options.load(MainActivity.this).curve) {
+                    Options.put(MainActivity.this, "curve", CURVE_NAMES[position]);
+                    send(StabilizerService.ACTION_RELOAD);
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
             }
         });
         mOptionsText = text("", 14);
@@ -167,18 +200,24 @@ public class MainActivity extends Activity {
         root.addView(mStartStop);
         root.addView(mPause);
         root.addView(mRecenter);
-        root.addView(mouse);
         root.addView(mDriftLabel);
         root.addView(mDriftInput);
-        root.addView(mMaxLabel);
-        root.addView(mMax);
+        root.addView(mYawLabel);
+        root.addView(mYaw);
+        root.addView(mPitchLabel);
+        root.addView(mPitch);
         root.addView(curveLabel);
         root.addView(mCurve);
         root.addView(mOptionsText);
         ScrollView scroll = new ScrollView(this);  // fits short screens, e.g. the glasses
         scroll.setBackgroundColor(Color.BLACK);
         scroll.addView(root);
-        setContentView(scroll);
+        screen.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        LinearLayout.LayoutParams mouseParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Math.round(inches(MOUSE_BUTTON_HEIGHT_IN)));
+        mouseParams.setMargins(48, 0, 48, 48);
+        screen.addView(mouse, mouseParams);
+        setContentView(screen);
 
         Shizuku.addRequestPermissionResultListener(mPermissionListener, mMain);
         Shizuku.addBinderReceivedListenerSticky(mBinderListener, mMain);
@@ -222,15 +261,25 @@ public class MainActivity extends Activity {
     /** Shows the saved settings on the sliders (they may have been changed over adb). */
     private void loadSliders() {
         Options o = Options.load(this);
-        int degrees = (int) Math.round(Math.toDegrees(o.max / o.focal));
+        int yaw = degrees(o.maxYaw);
+        int pitch = degrees(o.maxPitch);
         mDriftInput.setText(seconds(o.drift));
         mDriftInput.setError(null);
-        mMax.setProgress(degrees);
-        showMax(degrees);
+        mYaw.setProgress(yaw);
+        mPitch.setProgress(pitch);
+        showMax(yaw, pitch);
+        mCurve.setSelection(o.curve);
+    }
 
-        mLoading = true;
-        mCurve.check(o.curve + 1);
-        mLoading = false;
+    /** A max rotation option (picture offset in px) as degrees of head rotation. */
+    private int degrees(float maxPx) {
+        return (int) Math.round(Math.toDegrees(maxPx / Options.load(this).focal));
+    }
+
+    /** Saves a max rotation slider's value as the picture offset in px. */
+    private void saveMax(String key, int degrees) {
+        Options.put(this, key, String.valueOf(Math.round(Math.toRadians(degrees) * Options.load(this).focal)));
+        send(StabilizerService.ACTION_RELOAD);
     }
 
     /** Saves the typed drift time if it's a valid number of seconds. */
@@ -257,8 +306,17 @@ public class MainActivity extends Activity {
         return value == Math.rint(value) && value < 1e9f ? String.valueOf((long) value) : String.valueOf(value);
     }
 
-    private void showMax(int degrees) {
-        mMaxLabel.setText("Max rotation: " + degrees + "° of head movement");
+    private void showMax(int yaw, int pitch) {
+        mYawLabel.setText("Max side-to-side rotation (yaw): " + yaw + "°");
+        mPitchLabel.setText("Max up-and-down rotation (pitch): " + pitch + "°");
+    }
+
+    /** A drift curve in the drop-down: closed (no padding) or in the open list. */
+    private TextView curveRow(int position, View convertView, int padding) {
+        TextView t = convertView instanceof TextView ? (TextView) convertView : text("", 16);
+        t.setText(CURVE_LABELS[position]);
+        t.setPadding(padding, padding, padding, padding);
+        return t;
     }
 
     @Override
@@ -356,7 +414,11 @@ public class MainActivity extends Activity {
         return s;
     }
 
-    private Button button(String label, android.view.View.OnClickListener listener) {
+    private float inches(float in) {
+        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_IN, in, getResources().getDisplayMetrics());
+    }
+
+    private Button button(String label, View.OnClickListener listener) {
         Button b = new Button(this);
         b.setText(label);
         b.setGravity(Gravity.CENTER);

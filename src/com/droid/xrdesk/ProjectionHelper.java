@@ -50,8 +50,8 @@ public class ProjectionHelper extends Binder {
     static final int KEYBOARD_ON_PHONE = FIRST_CALL_TRANSACTION + 8;
     /** Oneway. In: int display id whose top task gets input focus. */
     static final int FOCUS_DISPLAY = FIRST_CALL_TRANSACTION + 9;
-    /** Out: boolean: a keyboard is showing (anywhere). */
-    static final int KEYBOARD_SHOWING = FIRST_CALL_TRANSACTION + 10;
+    /** Out: int: the top edge of the keyboard on its display (the phone), px; -1 = none is showing. */
+    static final int KEYBOARD_TOP = FIRST_CALL_TRANSACTION + 10;
     private static final int IME_POLICY_FALLBACK_DISPLAY = 1;  // WindowManager.DISPLAY_IME_POLICY_FALLBACK_DISPLAY
     /** Reserved by Shizuku: sent when the service should exit. */
     private static final int TRANSACTION_DESTROY = 16777114;
@@ -122,11 +122,11 @@ public class ProjectionHelper extends Binder {
                 data.enforceInterface(DESCRIPTOR);
                 MousePointer.focusDisplay(data.readInt());
                 return true;
-            case KEYBOARD_SHOWING: {
+            case KEYBOARD_TOP: {
                 data.enforceInterface(DESCRIPTOR);
-                boolean showing = keyboardShowing();
+                int top = keyboardTop();
                 reply.writeNoException();
-                reply.writeBoolean(showing);
+                reply.writeInt(top);
                 return true;
             }
             case MOUSE_SHOW:
@@ -320,11 +320,13 @@ public class ProjectionHelper extends Binder {
     private String mLastKeyboardState = "";
 
     /**
-     * A keyboard is showing if its window has a touchable region and its insets source is
-     * visible. The region alone can stay set when Android starts showing the keyboard and then
-     * aborts (as when focus comes back to an app whose text box still has the cursor).
+     * The keyboard's top edge, px on its display, or -1 if none is showing. A keyboard is showing
+     * if its window has a touchable region and its insets source is visible. The region alone can
+     * stay set when Android starts showing the keyboard and then aborts (as when focus comes back
+     * to an app whose text box still has the cursor). The insets source's frame is where the keys
+     * start, below any empty part of the keyboard's window, as apps that make room for it see it.
      */
-    private boolean keyboardShowing() {
+    private int keyboardTop() {
         try {
             if (mImeTouchRegion == null) {
                 IBinder binder = (IBinder) Class.forName("android.os.ServiceManager")
@@ -337,22 +339,23 @@ public class ProjectionHelper extends Binder {
                 mWindowInsets = wm.getMethod("getWindowInsets", int.class, IBinder.class,
                         Class.forName("android.view.InsetsState"));
             }
-            boolean region = !((android.graphics.Region) mImeTouchRegion.invoke(mWindowManager)).isEmpty();
-            boolean visible = region && imeInsetsVisible((int) mImeDisplay.invoke(mWindowManager));
-            String state = "region " + region + ", insets visible " + visible;
+            android.graphics.Region region = (android.graphics.Region) mImeTouchRegion.invoke(mWindowManager);
+            Rect frame = region.isEmpty() ? null : visibleImeFrame((int) mImeDisplay.invoke(mWindowManager));
+            int top = frame == null ? -1 : frame.isEmpty() ? region.getBounds().top : frame.top;
+            String state = "region " + !region.isEmpty() + ", insets visible " + (frame != null) + ", top " + top;
             if (!state.equals(mLastKeyboardState)) {
                 Log.i(TAG, "helper: keyboard " + state);
                 mLastKeyboardState = state;
             }
-            return visible;
+            return top;
         } catch (Throwable e) {
             Log.w(TAG, "helper: keyboard state unknown: " + e);
-            return false;
+            return -1;
         }
     }
 
-    /** Whether the display's IME insets source is visible (from its InsetsState). */
-    private boolean imeInsetsVisible(int displayId) throws ReflectiveOperationException {
+    /** The frame of the display's IME insets source if it's visible, else null (from its InsetsState). */
+    private Rect visibleImeFrame(int displayId) throws ReflectiveOperationException {
         Object state = Class.forName("android.view.InsetsState").getConstructor().newInstance();
         mWindowInsets.invoke(mWindowManager, displayId, null, state);
         int ime = android.view.WindowInsets.Type.ime();
@@ -361,10 +364,11 @@ public class ProjectionHelper extends Binder {
         for (int i = 0; i < n; i++) {
             Object source = c.getMethod("sourceAt", int.class).invoke(state, i);
             if ((int) source.getClass().getMethod("getType").invoke(source) == ime) {
-                return (boolean) source.getClass().getMethod("isVisible").invoke(source);
+                boolean visible = (boolean) source.getClass().getMethod("isVisible").invoke(source);
+                return visible ? (Rect) source.getClass().getMethod("getFrame").invoke(source) : null;
             }
         }
-        return false;
+        return null;
     }
 
     private synchronized void restore() {

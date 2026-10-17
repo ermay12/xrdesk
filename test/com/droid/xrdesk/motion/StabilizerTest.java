@@ -17,6 +17,9 @@ public final class StabilizerTest {
         linearIsConstantSpeed();
         accelerateSpeedsUpThenStops();
         curvesHeadStraightForCenter();
+        eachAxisHasItsOwnLimit();
+        largerLimitSetsReturnSpeed();
+        defaultCurveIsAccelerate();
         if (sFailures > 0) {
             System.out.println("StabilizerTest: " + sFailures + " FAILED");
             System.exit(1);
@@ -27,7 +30,7 @@ public final class StabilizerTest {
     /** A quick 2 degree turn to the left slides the picture right by about focal * angle. */
     private static void smallTurnIsCancelled() {
         Stabilizer s = new Stabilizer();
-        s.configure(2262f, 0.5f, 600f, 0f, 0.004f, Stabilizer.EXPONENTIAL);
+        s.configure(2262f, 0.5f, 600f, 600f, 0f, 0.004f, Stabilizer.EXPONENTIAL);
         float rad = (float) Math.toRadians(2);
         int steps = 50;  // 50 ms at 1 kHz
         for (int i = 0; i < steps; i++) {
@@ -41,7 +44,7 @@ public final class StabilizerTest {
     /** After the head stops, the offset decays to center within a few time constants. */
     private static void driftsBackToCenter() {
         Stabilizer s = new Stabilizer();
-        s.configure(2262f, 0.5f, 600f, 0f, 0.004f, Stabilizer.EXPONENTIAL);
+        s.configure(2262f, 0.5f, 600f, 600f, 0f, 0.004f, Stabilizer.EXPONENTIAL);
         for (int i = 0; i < 50; i++) {
             s.update(0f, 1f, 0.001f);
         }
@@ -55,7 +58,7 @@ public final class StabilizerTest {
 
     private static void deadbandIgnoresNoise() {
         Stabilizer s = new Stabilizer();
-        s.configure(2262f, 0.5f, 600f, 0.008f, 0.004f, Stabilizer.EXPONENTIAL);
+        s.configure(2262f, 0.5f, 600f, 600f, 0.008f, 0.004f, Stabilizer.EXPONENTIAL);
         for (int i = 0; i < 1000; i++) {
             s.update(0.003f, -0.003f, 0.001f);
         }
@@ -64,7 +67,7 @@ public final class StabilizerTest {
 
     private static void offsetIsClamped() {
         Stabilizer s = new Stabilizer();
-        s.configure(2262f, 0.5f, 600f, 0.008f, 0.004f, Stabilizer.EXPONENTIAL);
+        s.configure(2262f, 0.5f, 600f, 600f, 0.008f, 0.004f, Stabilizer.EXPONENTIAL);
         for (int i = 0; i < 500; i++) {
             s.update(0f, -5f, 0.001f);  // fast turn right
         }
@@ -74,7 +77,7 @@ public final class StabilizerTest {
     /** Tilting up (positive right-axis rate) slides the picture down. */
     private static void tiltMovesVertically() {
         Stabilizer s = new Stabilizer();
-        s.configure(2262f, 0.5f, 600f, 0f, 0.004f, Stabilizer.EXPONENTIAL);
+        s.configure(2262f, 0.5f, 600f, 600f, 0f, 0.004f, Stabilizer.EXPONENTIAL);
         for (int i = 0; i < 20; i++) {
             s.update(0.5f, 0f, 0.001f);
         }
@@ -184,7 +187,7 @@ public final class StabilizerTest {
         String[] names = {"smooth", "exp", "linear", "accel"};
         for (int curve = 0; curve < names.length; curve++) {
             Stabilizer s = new Stabilizer();
-            s.configure(2262f, 1f, 600f, 0f, 0.004f, curve);
+            s.configure(2262f, 1f, 600f, 600f, 0f, 0.004f, curve);
             for (int i = 0; i < 50; i++) {
                 s.update(0.8f, 3.2f, 0.001f);  // mostly left, a little up: about 4:1
             }
@@ -201,12 +204,55 @@ public final class StabilizerTest {
         }
     }
 
+    /** A fast turn right while tilting up stops at each direction's own limit, whatever the curve. */
+    private static void eachAxisHasItsOwnLimit() {
+        String[] names = {"smooth", "exp", "linear", "accel"};
+        for (int curve = 0; curve < names.length; curve++) {
+            Stabilizer s = new Stabilizer();
+            s.configure(2262f, 1f, 600f, 200f, 0.008f, 0.004f, curve);
+            for (int i = 0; i < 500; i++) {
+                s.update(5f, -5f, 0.001f);
+            }
+            check("limit x " + names[curve], Math.abs(s.x() + 600) <= 2, String.valueOf(s.x()));
+            check("limit y " + names[curve], Math.abs(s.y() - 200) <= 2, String.valueOf(s.y()));
+        }
+    }
+
+    /**
+     * Linear and accelerate still get halfway back from the larger limit in drift * ln 2, whichever
+     * direction it's in.
+     */
+    private static void largerLimitSetsReturnSpeed() {
+        for (int curve : new int[]{Stabilizer.LINEAR, Stabilizer.ACCELERATE}) {
+            Stabilizer s = new Stabilizer();
+            s.configure(2262f, 1f, 200f, 600f, 0f, 0.004f, curve);
+            float rad = 600f / 2262f;
+            for (int i = 0; i < 50; i++) {
+                s.update(rad / 0.05f, 0f, 0.001f);  // tilt up to the vertical limit
+            }
+            int start = s.y();
+            int ms = 0;
+            while (s.y() > start / 2 && ms < 10000) {
+                still(s, 1);
+                ms++;
+            }
+            float expected = 1000f * (float) Math.log(2);
+            check("larger limit " + curve, Math.abs(ms - expected) < 0.1f * expected, ms + " ms vs " + expected);
+        }
+    }
+
+    private static void defaultCurveIsAccelerate() {
+        check("default curve", Stabilizer.curveNamed(null) == Stabilizer.ACCELERATE, String.valueOf(Stabilizer.curveNamed(null)));
+        check("unknown curve", Stabilizer.curveNamed("bogus") == Stabilizer.ACCELERATE, "");
+        check("named curve", Stabilizer.curveNamed("smooth") == Stabilizer.SMOOTH, "");
+    }
+
     private static final float MAX_DEGREES = (float) Math.toDegrees(600 / 2262.0);
 
-    /** A Stabilizer (drift 1 s, max 600 px, no look-ahead) right after a quick 50 ms turn to the left. */
+    /** A Stabilizer (drift 1 s, max 600 px both ways, no look-ahead) right after a quick 50 ms turn to the left. */
     private static Stabilizer turned(int curve, float degrees) {
         Stabilizer s = new Stabilizer();
-        s.configure(2262f, 1f, 600f, 0f, 0.004f, curve);
+        s.configure(2262f, 1f, 600f, 600f, 0f, 0.004f, curve);
         float rad = (float) Math.toRadians(degrees);
         for (int i = 0; i < 50; i++) {
             s.update(0f, rad / 0.05f, 0.001f);

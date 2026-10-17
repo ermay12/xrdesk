@@ -1,6 +1,7 @@
 package com.droid.xrdesk;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Insets;
@@ -17,6 +18,9 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
+import android.os.VibrationAttributes;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Display;
@@ -29,15 +33,18 @@ import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.SeekBar;
+import android.widget.Switch;
 import android.widget.TextView;
 
 /**
  * The mouse screen: the phone becomes a mouse for the glasses. Where the phone's top edge points
  * sets the cursor, like a laser pointer; volume down recenters it. At the bottom, a block as tall
  * as the scroll strip holds Right click above Left click, with the scroll strip on the right
- * (drag down to scroll down). The pointer itself runs in the shell helper (MousePointer); this
- * screen starts StabilizerService in mouse mode if it isn't running, so stabilizing is optional.
+ * (drag down to scroll down, unless reversed). Above them are the mouse and scroll settings. The
+ * pointer itself runs in the shell helper (MousePointer); this screen starts StabilizerService in
+ * mouse mode if it isn't running, so stabilizing is optional.
  *
  * <p>Pointing: the rotation comes from Android's sensor fusion (game rotation vector: gyro +
  * accelerometer) at 100 Hz. The cursor follows the compass heading and elevation of the phone's
@@ -50,11 +57,12 @@ import android.widget.TextView;
  * focus on the glasses, so after a click focus stays there for up to KEYBOARD_WAIT_MS while the
  * helper checks whether a keyboard opened: if so, typing mode starts by itself; if not, focus
  * goes back to the phone for the volume keys. In typing mode this screen stops taking focus
- * when touched (else tapping a button would close the keyboard), the controls move up above the
- * keyboard, and the mode ends by itself once the keyboard closes. Volume down can't reach this
- * screen meanwhile. The Type button switches typing mode by hand, for apps that don't open the
- * keyboard themselves; the controls only move up while a keyboard is actually showing. The
- * system Back only closes the keyboard; the Back button at the top leaves this screen.
+ * when touched (else tapping a button would close the keyboard), the phone gives a short buzz as
+ * the keyboard opens, the controls fill the space between the status and the keyboard, and the
+ * mode ends by itself once the keyboard closes. Volume down can't reach this screen meanwhile.
+ * The Type button switches typing mode by hand, for apps that don't open the keyboard themselves;
+ * the controls only move up while a keyboard is actually showing. The system Back only closes
+ * the keyboard; the Back button at the top leaves this screen.
  *
  * <p>Click lock: pressing a button jolts the phone, which would turn a click into a small drag.
  * So the cursor freezes while a button is held, until the phone turns past DRAG_START_RAD (a
@@ -63,16 +71,18 @@ import android.widget.TextView;
  */
 public class MouseActivity extends Activity implements SensorEventListener {
     private static final float SCROLL_HEIGHT_IN = 2.5f;
-    private static final float TYPING_SCROLL_HEIGHT_IN = 1.5f;  // smaller, to fit above the keyboard
     private static final float TYPE_BUTTON_HEIGHT_IN = 0.45f;
+    private static final float KEYBOARD_BUZZ_SCALE = 0.6f;  // a gentle click as the keyboard opens
     private static final int TYPING_COLOR = 0xFF1E4F8C;
     private static final float SCROLL_WIDTH_IN = 0.75f;
-    private static final float SCROLL_NOTCH_IN = 0.15f;  // finger travel per wheel notch
+    private static final float SCROLL_NOTCH_IN = 0.15f;  // finger travel per wheel notch at scroll speed 1x
     private static final float DRAG_START_RAD = (float) Math.toRadians(3);
     private static final long RELEASE_HOLD_MS = 250;
-    private static final long KEYBOARD_WAIT_MS = 600;     // after a click, for a keyboard to open
+    private static final long KEYBOARD_WAIT_MS = 900;     // after a click (whose release may wait 300 ms), for a keyboard
     private static final long KEYBOARD_POLL_MS = 50;
     private static final long KEYBOARD_WATCH_MS = 300;    // in typing mode, for it to close
+    private static final String SIDEWAYS = "side to side";
+    private static final String UP_AND_DOWN = "up and down";
     private static final int BUTTON_COLOR = 0xFF2A2A2A;
     private static final int PRESSED_COLOR = 0xFF5A5A5A;
 
@@ -90,7 +100,8 @@ public class MouseActivity extends Activity implements SensorEventListener {
     private final float[] mMatrix = new float[9];
     private int mWidth;                 // the glasses' display, px
     private int mHeight;
-    private float mPxPerRad;
+    private float mPxPerRadX;           // cursor speeds: sideways, up and down
+    private float mPxPerRadY;
     private boolean mCentered;          // false = the next sample becomes the center
     private float mYaw0;                // the heading and elevation at the center
     private float mPitch0;
@@ -116,17 +127,26 @@ public class MouseActivity extends Activity implements SensorEventListener {
     private int mKeyboardGoneChecks;
 
     private float mScrollNotchPx;       // main thread
+    private Vibrator mVibrator;
     private LinearLayout mRoot;
-    private View mSpacer;
+    private Insets mBars = Insets.NONE;
+    private View mSettings;             // the speed sliders and scroll switch
     private View mBlock;
     private GradientDrawable mTypeBg;
-    private TextView mSpeedLabel;
-    private SeekBar mSpeedSlider;
+    private TextView mSpeedXLabel;
+    private SeekBar mSpeedX;
+    private TextView mSpeedYLabel;
+    private SeekBar mSpeedY;
+    private TextView mScrollSpeedLabel;
+    private SeekBar mScrollSpeedSlider;
+    private Switch mScrollReverse;
     private volatile boolean mTyping;   // main thread writes
-    private boolean mKeyboardShown;     // main thread: the controls are moved up for it
+    private int mKeyboardTop = -1;      // main thread: the controls are fitted above a keyboard with this top edge
     private volatile int mHomeDisplay;  // this screen's display (the phone)
     private float mScrollLastY;         // main thread
     private float mScrollTicks;
+    private float mScrollSpeed = 1f;    // main thread: wheel notches per SCROLL_NOTCH_IN
+    private boolean mScrollInvert;      // main thread: drag down to scroll up
 
     /** Picks up the helper when stabilizing starts or restarts while this screen is open. */
     private final Runnable mWatch = new Runnable() {
@@ -149,16 +169,18 @@ public class MouseActivity extends Activity implements SensorEventListener {
         mSensors = getSystemService(SensorManager.class);
         mRotation = mSensors.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
         mScrollNotchPx = inches(SCROLL_NOTCH_IN);
+        mVibrator = getSystemService(Vibrator.class);
         mPointerThread = new HandlerThread("xrdesk-pointer", Process.THREAD_PRIORITY_DISPLAY);
         mPointerThread.start();
         mPointer = new Handler(mPointerThread.getLooper());
 
         LinearLayout root = new LinearLayout(this);
+        mRoot = root;
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.BLACK);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
-            Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-            v.setPadding(24 + bars.left, 16 + bars.top, 24 + bars.right, 24 + bars.bottom);
+            mBars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            applyPadding();
             return insets;
         });
 
@@ -180,18 +202,32 @@ public class MouseActivity extends Activity implements SensorEventListener {
         mStatus.setPadding(0, 24, 0, 0);
         root.addView(mStatus);
 
-        // Mouse speed, applied right away; 1.0x = the cursor goes where the phone points.
-        mSpeedLabel = label("");
-        mSpeedLabel.setTextSize(16);
-        mSpeedLabel.setPadding(0, 32, 0, 8);
-        root.addView(mSpeedLabel);
-        root.addView(speedSlider());
+        // Settings, applied right away: mouse speeds, sideways and up and down (1.0x = the cursor
+        // goes where the phone points), scroll speed and direction. They take the room left
+        // above the buttons, scrolling if it's short, and make way for a keyboard.
+        LinearLayout settings = new LinearLayout(this);
+        settings.setOrientation(LinearLayout.VERTICAL);
+        mSpeedXLabel = speedLabel();
+        mSpeedX = speedSlider(mSpeedXLabel, SIDEWAYS, "pointerx");
+        mSpeedYLabel = speedLabel();
+        mSpeedY = speedSlider(mSpeedYLabel, UP_AND_DOWN, "pointery");
+        mScrollSpeedLabel = speedLabel();
+        mScrollSpeedSlider = scrollSpeedSlider(mScrollSpeedLabel);
+        mScrollReverse = scrollReverseSwitch();
+        settings.addView(mSpeedXLabel);
+        settings.addView(mSpeedX);
+        settings.addView(mSpeedYLabel);
+        settings.addView(mSpeedY);
+        settings.addView(mScrollSpeedLabel);
+        settings.addView(mScrollSpeedSlider);
+        settings.addView(mScrollReverse);
+        ScrollView settingsScroll = new ScrollView(this);
+        settingsScroll.addView(settings);
+        mSettings = settingsScroll;
+        root.addView(settingsScroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         // Bottom: two columns of the same height. Left: Right click above Left click. Right: the
-        // scroll strip above the Type button. In typing mode the spacer moves below them.
-        mRoot = root;
-        mSpacer = new View(this);
-        root.addView(mSpacer, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        // scroll strip above the Type button. Above a keyboard they take the settings' room too.
         LinearLayout block = new LinearLayout(this);
         mBlock = block;
         LinearLayout clicks = new LinearLayout(this);
@@ -218,13 +254,21 @@ public class MouseActivity extends Activity implements SensorEventListener {
                 Math.round(inches(SCROLL_WIDTH_IN)), LinearLayout.LayoutParams.MATCH_PARENT);
         sideParams.leftMargin = 16;
         block.addView(side, sideParams);
-        root.addView(block, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, blockHeight(false)));
+        root.addView(block, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, blockHeight()));
         setContentView(root);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        Options options = Options.load(this);
+        showSpeed(mSpeedX, mSpeedXLabel, SIDEWAYS, options.pointerX / options.focal);
+        showSpeed(mSpeedY, mSpeedYLabel, UP_AND_DOWN, options.pointerY / options.focal);
+        mScrollSpeed = options.scrollSpeed;
+        mScrollInvert = options.scrollInvert;
+        mScrollSpeedSlider.setProgress(Math.round(mScrollSpeed * 10f));
+        mScrollSpeedLabel.setText(scrollSpeedText(mScrollSpeedSlider.getProgress()));
+        mScrollReverse.setChecked(mScrollInvert);
         // The service runs while stabilizing or while this screen is open; it attaches the helper.
         startForegroundService(new Intent(this, StabilizerService.class).setAction(StabilizerService.ACTION_MOUSE_ON));
         connect();
@@ -265,12 +309,11 @@ public class MouseActivity extends Activity implements SensorEventListener {
         Point size = new Point();
         display.getRealSize(size);
         Options options = Options.load(this);
-        float pxPerRad = options.pointer;
-        mSpeedSlider.setProgress(Math.round(options.pointer / options.focal * 10f));
         mPointer.post(() -> {
             mWidth = size.x;
             mHeight = size.y;
-            mPxPerRad = pxPerRad;
+            mPxPerRadX = options.pointerX;
+            mPxPerRadY = options.pointerY;
             mCentered = false;
             mSentX = mSentY = Float.NaN;
             mButtonsDown = 0;
@@ -292,7 +335,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
 
     private void showStatus() {
         if (mTyping) {
-            mStatus.setText(mKeyboardShown
+            mStatus.setText(mKeyboardTop >= 0
                     ? "Typing on the glasses. Ends when the keyboard closes, or press Back or Type."
                     : "Click a text box on the glasses to type. Type or Back cancels.");
         } else {
@@ -328,29 +371,64 @@ public class MouseActivity extends Activity implements SensorEventListener {
         }
         mTypeBg.setColor(on ? TYPING_COLOR : BUTTON_COLOR);
         if (!on) {
-            keyboardShown(false);
+            keyboardShown(-1);
         }
         showStatus();
     }
 
     /**
-     * Main thread. While a keyboard is on screen, the controls sit just under the status, above
-     * it; typing mode alone (Type pressed outside a text box) doesn't move them.
+     * Main thread. While a keyboard is on screen (top: its top edge, screen px; -1 = none), the
+     * controls fill the space between the status and it; typing mode alone (Type pressed outside
+     * a text box) doesn't move them. The phone buzzes as a keyboard opens.
      */
-    private void keyboardShown(boolean shown) {
-        if (shown == mKeyboardShown) {
+    private void keyboardShown(int top) {
+        if (top == mKeyboardTop) {
             return;
         }
-        mKeyboardShown = shown;
-        mRoot.removeView(mSpacer);
-        mRoot.addView(mSpacer, shown ? mRoot.getChildCount() : mRoot.indexOfChild(mBlock),
-                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-        mBlock.getLayoutParams().height = blockHeight(shown);
-        int speedVisibility = shown ? View.GONE : View.VISIBLE;  // room above the keyboard
-        mSpeedLabel.setVisibility(speedVisibility);
-        mSpeedSlider.setVisibility(speedVisibility);
-        mBlock.requestLayout();
+        boolean shown = top >= 0;
+        if (shown && mKeyboardTop < 0) {
+            buzzKeyboardOpened();
+        }
+        mKeyboardTop = top;
+        mSettings.setVisibility(shown ? View.GONE : View.VISIBLE);
+        LinearLayout.LayoutParams block = (LinearLayout.LayoutParams) mBlock.getLayoutParams();
+        block.height = shown ? 0 : blockHeight();
+        block.weight = shown ? 1f : 0f;
+        mBlock.setLayoutParams(block);
+        applyPadding();
         showStatus();
+    }
+
+    /**
+     * Main thread. Keeps the controls clear of the system bars and, while one is showing, of the
+     * keyboard: it covers this screen without resizing it, as this screen doesn't type into it.
+     */
+    private void applyPadding() {
+        int bottom = mBars.bottom;
+        if (mKeyboardTop >= 0) {
+            int[] at = new int[2];
+            mRoot.getLocationOnScreen(at);
+            int covered = at[1] + mRoot.getHeight() - mKeyboardTop;
+            bottom = Math.max(bottom, Math.min(covered, mRoot.getHeight() * 2 / 3));  // a sane keyboard
+        }
+        mRoot.setPadding(24 + mBars.left, 16 + mBars.top, 24 + mBars.right, 24 + bottom);
+    }
+
+    /**
+     * A short, gentle click, so you can feel the keyboard open without looking at the phone. As
+     * hardware feedback (the phone is the glasses' mouse and keyboard), so it still plays when
+     * touch feedback is turned off in the phone's settings or the phone is on silent.
+     */
+    private void buzzKeyboardOpened() {
+        if (mVibrator == null || !mVibrator.hasVibrator()) {
+            return;
+        }
+        VibrationEffect effect = mVibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_CLICK)
+                ? VibrationEffect.startComposition()
+                        .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, KEYBOARD_BUZZ_SCALE)
+                        .compose()
+                : VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK);
+        mVibrator.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_HARDWARE_FEEDBACK));
     }
 
     private void disconnect() {
@@ -380,10 +458,11 @@ public class MouseActivity extends Activity implements SensorEventListener {
             if (helper == null || mTyping) {
                 return;
             }
-            if (helper.keyboardShowing()) {
+            int top = helper.keyboardTop();
+            if (top >= 0) {
                 mMain.post(() -> {
                     setTyping(true);
-                    keyboardShown(true);
+                    keyboardShown(top);
                 });
             } else if (SystemClock.uptimeMillis() < mKeyboardWaitUntilMs) {
                 mPointer.postDelayed(this, KEYBOARD_POLL_MS);
@@ -393,7 +472,10 @@ public class MouseActivity extends Activity implements SensorEventListener {
         }
     };
 
-    /** Pointer thread, in typing mode: ends it once the keyboard has shown and then closed. */
+    /**
+     * Pointer thread, in typing mode: fits the controls above the keyboard while it shows (it can
+     * change height), and ends typing mode once the keyboard has shown and then closed.
+     */
     private final Runnable mWatchKeyboard = new Runnable() {
         @Override
         public void run() {
@@ -401,8 +483,8 @@ public class MouseActivity extends Activity implements SensorEventListener {
             if (helper == null || !mTyping) {
                 return;
             }
-            boolean showing = helper.keyboardShowing();
-            if (showing) {
+            int top = helper.keyboardTop();
+            if (top >= 0) {
                 mKeyboardSeen = true;
                 mKeyboardGoneChecks = 0;
             } else if (mKeyboardSeen && ++mKeyboardGoneChecks >= 2) {
@@ -411,7 +493,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
             }
             mMain.post(() -> {
                 if (mTyping) {
-                    keyboardShown(showing);
+                    keyboardShown(top);
                 }
             });
             mPointer.postDelayed(this, KEYBOARD_WATCH_MS);
@@ -475,8 +557,8 @@ public class MouseActivity extends Activity implements SensorEventListener {
         if (mButtonsDown != 0 && !mDragging && Math.hypot(mA - mPressA, mB - mPressB) > DRAG_START_RAD) {
             mDragging = true;  // a deliberate drag: let the cursor go
         }
-        float x = mWidth / 2f + (mA - mOffA) * mPxPerRad;
-        float y = mHeight / 2f - (mB - mOffB) * mPxPerRad;
+        float x = mWidth / 2f + (mA - mOffA) * mPxPerRadX;
+        float y = mHeight / 2f - (mB - mOffB) * mPxPerRadY;
         float cx;
         float cy;
         if (frozen()) {
@@ -488,8 +570,8 @@ public class MouseActivity extends Activity implements SensorEventListener {
             cx = Math.max(0f, Math.min(mWidth - 1, x));
             cy = Math.max(0f, Math.min(mHeight - 1, y));
         }
-        mOffA += (x - cx) / mPxPerRad;
-        mOffB -= (y - cy) / mPxPerRad;
+        mOffA += (x - cx) / mPxPerRadX;
+        mOffB -= (y - cy) / mPxPerRadY;
         if (Math.abs(cx - mSentX) >= 0.5f || Math.abs(cy - mSentY) >= 0.5f || Float.isNaN(mSentX)) {
             helper.mouseMove(cx, cy);
             mSentX = cx;
@@ -583,7 +665,11 @@ public class MouseActivity extends Activity implements SensorEventListener {
         return v;
     }
 
-    /** Drag down to scroll down, like a scroll bar; one wheel notch per SCROLL_NOTCH_IN of travel. */
+    /**
+     * Drag down to scroll down, like a scroll bar (or up, if reversed); scroll speed wheel notches
+     * per SCROLL_NOTCH_IN of travel. The phone ticks every SCROLL_NOTCH_IN whatever the speed,
+     * like a wheel's detents.
+     */
     private View scrollStrip() {
         GradientDrawable bg = rounded(BUTTON_COLOR);
         TextView v = label("▲\n\n\nScroll\n\n\n▼");
@@ -597,12 +683,13 @@ public class MouseActivity extends Activity implements SensorEventListener {
                     mScrollTicks = 0f;
                     break;
                 case MotionEvent.ACTION_MOVE: {
-                    float notches = -(ev.getY() - mScrollLastY) / mScrollNotchPx;
+                    float notches = -(ev.getY() - mScrollLastY) / mScrollNotchPx;  // of travel
                     mScrollLastY = ev.getY();
+                    float wheel = notches * mScrollSpeed * (mScrollInvert ? -1f : 1f);
                     mPointer.post(() -> {
                         Helper helper = mHelper;
                         if (helper != null) {
-                            helper.mouseScroll(notches);
+                            helper.mouseScroll(wheel);
                         }
                     });
                     mScrollTicks += notches;
@@ -665,25 +752,36 @@ public class MouseActivity extends Activity implements SensorEventListener {
     }
 
     /** Both columns: the scroll strip (or the click buttons) plus the Type button below it. */
-    private int blockHeight(boolean typing) {
-        return Math.round(inches((typing ? TYPING_SCROLL_HEIGHT_IN : SCROLL_HEIGHT_IN) + TYPE_BUTTON_HEIGHT_IN)) + 16;
+    private int blockHeight() {
+        return Math.round(inches(SCROLL_HEIGHT_IN + TYPE_BUTTON_HEIGHT_IN)) + 16;
     }
 
-    /** 0.3x to 3x in tenths; saved as the pointer option (pixels per radian = speed x focal). */
-    private SeekBar speedSlider() {
-        mSpeedSlider = new SeekBar(this);
-        mSpeedSlider.setMin(3);
-        mSpeedSlider.setMax(30);
-        mSpeedSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+    private TextView speedLabel() {
+        TextView v = label("");
+        v.setTextSize(16);
+        v.setPadding(0, 32, 0, 8);
+        return v;
+    }
+
+    /**
+     * 0.3x to 3x in tenths; saved as one direction's pointer option, pointerx or pointery
+     * (pixels per radian = speed x focal).
+     */
+    private SeekBar speedSlider(TextView label, String direction, String key) {
+        SeekBar slider = new SeekBar(this);
+        slider.setMin(3);
+        slider.setMax(30);
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int tenths, boolean fromUser) {
-                showSpeed(tenths);
+                label.setText(speedText(direction, tenths));
                 if (!fromUser) {
                     return;
                 }
-                float pxPerRad = tenths / 10f * Options.load(MouseActivity.this).focal;
-                Options.put(MouseActivity.this, "pointer", String.valueOf(Math.round(pxPerRad)));
-                mPointer.post(() -> setSpeed(pxPerRad));
+                Context context = MouseActivity.this;
+                Options.put(context, key, String.valueOf(Math.round(tenths / 10f * Options.load(context).focal)));
+                Options options = Options.load(context);
+                mPointer.post(() -> setSpeed(options.pointerX, options.pointerY));
             }
 
             @Override
@@ -694,21 +792,74 @@ public class MouseActivity extends Activity implements SensorEventListener {
             public void onStopTrackingTouch(SeekBar seekBar) {
             }
         });
-        return mSpeedSlider;
+        return slider;
     }
 
-    private void showSpeed(int tenths) {
-        mSpeedLabel.setText(String.format(java.util.Locale.US, "Mouse speed: %.1f×", tenths / 10f));
+    /** 0.2x to 5x in tenths, saved as the scroll option. */
+    private SeekBar scrollSpeedSlider(TextView label) {
+        SeekBar slider = new SeekBar(this);
+        slider.setMin(2);
+        slider.setMax(50);
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int tenths, boolean fromUser) {
+                label.setText(scrollSpeedText(tenths));
+                if (fromUser) {
+                    mScrollSpeed = tenths / 10f;
+                    Options.put(MouseActivity.this, "scroll", String.valueOf(mScrollSpeed));
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+            }
+        });
+        return slider;
     }
 
-    /** Pointer thread. A new speed, keeping the cursor where it is. */
-    private void setSpeed(float pxPerRad) {
-        if (mPxPerRad > 0f) {
-            float keep = mPxPerRad / pxPerRad;  // same (angle - offset) * speed as before
-            mOffA = mA - (mA - mOffA) * keep;
-            mOffB = mB - (mB - mOffB) * keep;
+    private static String scrollSpeedText(int tenths) {
+        return String.format(java.util.Locale.US, "Scroll speed: %.1f×", tenths / 10f);
+    }
+
+    /** Off: drag down to scroll down, like a scroll bar. On: like a touch screen. Saved as scrollinv. */
+    private Switch scrollReverseSwitch() {
+        Switch s = new Switch(this);
+        s.setText("Reverse scroll direction");
+        s.setTextColor(Color.WHITE);
+        s.setTextSize(16);
+        s.setPadding(32, 24, 32, 0);
+        s.setOnCheckedChangeListener((v, checked) -> {
+            if (checked != mScrollInvert) {
+                mScrollInvert = checked;
+                Options.put(this, "scrollinv", checked ? "1" : "0");
+            }
+        });
+        return s;
+    }
+
+    /** Shows a saved speed (× where the phone points) on a slider and its label. */
+    private void showSpeed(SeekBar slider, TextView label, String direction, float speed) {
+        slider.setProgress(Math.round(speed * 10f));
+        label.setText(speedText(direction, slider.getProgress()));  // setProgress only reports a change
+    }
+
+    private static String speedText(String direction, int tenths) {
+        return String.format(java.util.Locale.US, "Mouse speed, %s: %.1f×", direction, tenths / 10f);
+    }
+
+    /** Pointer thread. New speeds, keeping the cursor where it is. */
+    private void setSpeed(float pxPerRadX, float pxPerRadY) {
+        if (mPxPerRadX > 0f && mPxPerRadY > 0f) {
+            // Same (angle - offset) * speed as before.
+            mOffA = mA - (mA - mOffA) * (mPxPerRadX / pxPerRadX);
+            mOffB = mB - (mB - mOffB) * (mPxPerRadY / pxPerRadY);
         }
-        mPxPerRad = pxPerRad;
+        mPxPerRadX = pxPerRadX;
+        mPxPerRadY = pxPerRadY;
     }
 
     private float inches(float in) {

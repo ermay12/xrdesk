@@ -121,16 +121,16 @@ final class Helper {
         }
     }
 
-    /** True while a keyboard is showing. */
-    boolean keyboardShowing() {
+    /** The keyboard's top edge on the phone's display, px, or -1 while no keyboard is showing. */
+    int keyboardTop() {
         Parcel data = start();
         Parcel reply = Parcel.obtain();
         try {
-            mBinder.transact(ProjectionHelper.KEYBOARD_SHOWING, data, reply, 0);
+            mBinder.transact(ProjectionHelper.KEYBOARD_TOP, data, reply, 0);
             reply.readException();
-            return reply.readBoolean();
+            return reply.readInt();
         } catch (RemoteException | RuntimeException e) {
-            return false;
+            return -1;
         } finally {
             data.recycle();
             reply.recycle();

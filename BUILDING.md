@@ -34,7 +34,7 @@ Connect the phone with adb (USB, or **Developer options → Wireless debugging**
 ./xrdesk.sh start                 # start stabilizing (same as Start in the app)
 ./xrdesk.sh stop | pause | recenter
 ./xrdesk.sh mouse                 # open the mouse screen
-./xrdesk.sh options drift=3 max=800   # save settings, applied right away; none = defaults
+./xrdesk.sh options drift=3 maxyaw=800   # save settings, applied right away; none = defaults
 ./xrdesk.sh log                   # follow the log (tag XRDesk)
 ```
 
@@ -77,9 +77,9 @@ phone's rotation sensor ──> MouseActivity ──moves, clicks, scroll──>
   [NOTES-xreal.md](NOTES-xreal.md)), and turns head rotation into a picture offset with
   `motion/Stabilizer`, at most once per frame.
 - `Stabilizer` integrates the rotation and pulls the offset back to center along the chosen
-  curve: smooth (a critically damped spring), exponential (a leaky integrator), linear or
-  accelerate (both straight toward center). All reach halfway back from the largest offset in
-  `drift × ln 2`. Plain Java, tested in `test/`.
+  curve: accelerate (the default) or linear (both straight toward center), smooth (a critically
+  damped spring) or exponential (a leaky integrator). Each direction has its own largest offset;
+  all reach halfway back from the larger one in `drift × ln 2`. Plain Java, tested in `test/`.
 - `ProjectionHelper` runs as the shell user through Shizuku. It finds the glasses' physical
   display token (`DisplayControl` from `services.jar`, as scrcpy does) and shifts the display
   rect of the display's SurfaceFlinger projection by the offset
@@ -99,9 +99,15 @@ phone's rotation sensor ──> MouseActivity ──moves, clicks, scroll──>
   window that another app's surface covers, and the arrow covers the very pixel being clicked.
 - Typing: while the mouse screen is open, the glasses' keyboard policy is "show it on the phone"
   (`IWindowManager.setDisplayImePolicy`). Android has one input focus, and a click on the glasses
-  moves it there; after a click, focus stays there for up to 0.6 s while the helper checks
+  moves it there; after a click, focus stays there for up to 0.9 s while the helper checks
   whether a keyboard opened (IME touch region and visible IME insets). If one did, typing mode
   starts; otherwise focus goes back to the phone, so its volume keys reach the mouse screen.
+  Android moves focus a little after the press, and a text box asks for the keyboard on release
+  only if its window has focus by then, so `MousePointer` holds a release until focus has
+  reached the glasses (polling `IActivityTaskManager.getFocusedRootTaskInfo`) plus a margin,
+  at most 0.3 s after the press. Without that, quick clicks rarely opened the keyboard.
+  The keyboard covers the mouse screen without resizing it (that screen isn't its target), so
+  the helper also reports the IME insets frame, and the controls are padded to end above it.
 
 ### Non-public Android APIs used
 
@@ -109,7 +115,7 @@ All from the shell helper, which isn't subject to hidden API restrictions: `Disp
 `SurfaceControl.Transaction.setDisplayProjection`, `setLayerStack` and `setTrustedOverlay`,
 `InputManagerGlobal.injectInputEvent` with `MotionEvent.setDisplayId` and `setActionButton`,
 `IWindowManager` (`setDisplayImePolicy`, `getCurrentImeTouchRegion`, `getWindowInsets`) and
-`IActivityTaskManager.focusTopTask`. They can change in any Android release.
+`IActivityTaskManager` (`focusTopTask`, `getFocusedRootTaskInfo`). They can change in any Android release.
 
 ## Layout
 

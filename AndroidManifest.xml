@@ -14,6 +14,8 @@
     <!-- Install-time permission that satisfies the connectedDevice foreground service prerequisite. -->
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Mouse screen: a short buzz when the keyboard opens. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- Debuggable only in development builds (xrdesk.sh build passes aapt debug mode). -->
     <application android:label="XR Desk">
