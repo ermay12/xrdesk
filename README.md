@@ -3,7 +3,7 @@
 This android app enables advanced screen stabilization for the XReal XBX A01+ XR glasses as well as pointer based mouse and keyboard control.
 
 > [!NOTE]
-> This app was completely vibecoded by Opus 5.5.
+> This app was completely vibecoded with Opus 5.5.
 >
 > I only provided design direction and testing.
 
