@@ -1,10 +1,12 @@
 package com.droid.xrdesk;
 
+import android.content.ComponentName;
 import android.graphics.Rect;
 import android.os.Binder;
 import android.os.IBinder;
 import android.os.Parcel;
 import android.os.RemoteException;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.SurfaceControl;
 
@@ -12,6 +14,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -52,6 +55,10 @@ public class ProjectionHelper extends Binder {
     static final int FOCUS_DISPLAY = FIRST_CALL_TRANSACTION + 9;
     /** Out: int: the top edge of the keyboard on its display (the phone), px; -1 = none is showing. */
     static final int KEYBOARD_TOP = FIRST_CALL_TRANSACTION + 10;
+    /** Oneway. In: int display id that Android's USB permission dialog should move to once it opens. */
+    static final int USB_DIALOG_TO = FIRST_CALL_TRANSACTION + 11;
+    private static final String USB_DIALOG = ".usb.UsbPermissionActivity";  // in SystemUI
+    private static final long USB_DIALOG_WAIT_MS = 3000;
     private static final int IME_POLICY_FALLBACK_DISPLAY = 1;  // WindowManager.DISPLAY_IME_POLICY_FALLBACK_DISPLAY
     /** Reserved by Shizuku: sent when the service should exit. */
     private static final int TRANSACTION_DESTROY = 16777114;
@@ -127,6 +134,12 @@ public class ProjectionHelper extends Binder {
                 int top = keyboardTop();
                 reply.writeNoException();
                 reply.writeInt(top);
+                return true;
+            }
+            case USB_DIALOG_TO: {
+                data.enforceInterface(DESCRIPTOR);
+                int displayId = data.readInt();
+                new Thread(() -> usbDialogTo(displayId), "xrdesk-usb-dialog").start();
                 return true;
             }
             case MOUSE_SHOW:
@@ -309,6 +322,39 @@ public class ProjectionHelper extends Binder {
         } catch (Throwable e) {
             Log.e(TAG, "helper: couldn't change the keyboard policy", e);
             return false;
+        }
+    }
+
+    /**
+     * Moves Android's USB permission dialog to a display (the phone) once it opens. With the
+     * glasses as a desktop, Android opens it there, where it's easy to miss; the user still
+     * answers it. Waits up to USB_DIALOG_WAIT_MS for one to show up elsewhere.
+     */
+    private static void usbDialogTo(int displayId) {
+        try {
+            Object atm = Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null);
+            Method rootTasks = atm.getClass().getMethod("getAllRootTaskInfos");
+            Method move = atm.getClass().getMethod("moveRootTaskToDisplay", int.class, int.class);
+            long deadline = SystemClock.uptimeMillis() + USB_DIALOG_WAIT_MS;
+            while (SystemClock.uptimeMillis() < deadline) {
+                boolean moved = false;
+                for (Object task : (List<?>) rootTasks.invoke(atm)) {
+                    ComponentName top = (ComponentName) task.getClass().getField("topActivity").get(task);
+                    if (top != null && top.getClassName().endsWith(USB_DIALOG)
+                            && task.getClass().getField("displayId").getInt(task) != displayId) {
+                        move.invoke(atm, task.getClass().getField("taskId").getInt(task), displayId);
+                        Log.i(TAG, "helper: moved the USB permission dialog to display " + displayId);
+                        moved = true;
+                    }
+                }
+                if (moved) {
+                    return;
+                }
+                SystemClock.sleep(50);
+            }
+            Log.i(TAG, "helper: no USB permission dialog to move");  // e.g. it opened on the phone
+        } catch (Throwable e) {
+            Log.w(TAG, "helper: couldn't move the USB permission dialog: " + e);
         }
     }
 

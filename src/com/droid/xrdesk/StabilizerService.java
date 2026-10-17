@@ -20,6 +20,7 @@ import android.os.Process;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.Choreographer;
+import android.view.Display;
 
 import com.droid.xrdesk.motion.Stabilizer;
 import com.droid.xrdesk.xreal.RateRing;
@@ -131,7 +132,14 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         mStab = new Handler(mStabThread.getLooper());
         mStab.post(() -> mChoreographer = Choreographer.getInstance());
         mStab.post(this::configure);
-        mImu = new XrealImuSource(this, mImuListener);
+        // Android opens its USB permission dialog on the glasses (the desktop display), where
+        // it's easy to miss; the helper (attached before the IMU starts) moves it to the phone.
+        mImu = new XrealImuSource(this, mImuListener, () -> {
+            Helper helper = mHelper;
+            if (helper != null) {
+                helper.usbDialogTo(Display.DEFAULT_DISPLAY);
+            }
+        });
         mDisplayManager = getSystemService(DisplayManager.class);
         mDisplayManager.registerDisplayListener(mDisplayListener, mMain);
 

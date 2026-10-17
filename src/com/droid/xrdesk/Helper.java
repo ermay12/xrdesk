@@ -137,6 +137,13 @@ final class Helper {
         }
     }
 
+    /** Moves Android's USB permission dialog to a display once it opens (it may open on the glasses). */
+    void usbDialogTo(int displayId) {
+        Parcel data = start();
+        data.writeInt(displayId);
+        oneway(ProjectionHelper.USB_DIALOG_TO, data);
+    }
+
     /** Gives input focus to a display's top task. */
     void focusDisplay(int displayId) {
         Parcel data = start();

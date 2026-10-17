@@ -51,6 +51,7 @@ final class XrealImuSource {
     private final Context mContext;
     private final UsbManager mUsbManager;
     private final Listener mListener;
+    private final Runnable mAfterAsking;
     private final RateRing mRing = new RateRing(512);
 
     private volatile boolean mEnabled;
@@ -58,10 +59,12 @@ final class XrealImuSource {
     private volatile int mRetries;
     private boolean mReceiverRegistered;
 
-    XrealImuSource(Context context, Listener listener) {
+    /** afterAsking: runs right after Android is asked to show its USB permission dialog. */
+    XrealImuSource(Context context, Listener listener, Runnable afterAsking) {
         mContext = context;
         mUsbManager = context.getSystemService(UsbManager.class);
         mListener = listener;
+        mAfterAsking = afterAsking;
     }
 
     RateRing ring() {
@@ -157,6 +160,7 @@ final class XrealImuSource {
             PendingIntent pi = PendingIntent.getBroadcast(mContext, 0, intent,
                     PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
             mUsbManager.requestPermission(device, pi);
+            mAfterAsking.run();
             mListener.onStateChanged(false, "waiting for USB permission");
             return;
         }

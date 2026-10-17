@@ -75,7 +75,8 @@ phone's rotation sensor ──> MouseActivity ──moves, clicks, scroll──>
 - `StabilizerService` (a foreground service) reads the glasses' gyro over USB HID with
   `XrealImuSource` (about 800 samples/s; protocol and sources in `xreal/` and
   [NOTES-xreal.md](NOTES-xreal.md)), and turns head rotation into a picture offset with
-  `motion/Stabilizer`, at most once per frame.
+  `motion/Stabilizer`, at most once per frame. With the glasses as a desktop, Android opens its
+  USB permission dialog on them, where it's easy to miss, so the helper moves it to the phone.
 - `Stabilizer` integrates the rotation and pulls the offset back to center along the chosen
   curve: accelerate (the default) or linear (both straight toward center), smooth (a critically
   damped spring) or exponential (a leaky integrator). Each direction has its own largest offset;
@@ -115,7 +116,8 @@ All from the shell helper, which isn't subject to hidden API restrictions: `Disp
 `SurfaceControl.Transaction.setDisplayProjection`, `setLayerStack` and `setTrustedOverlay`,
 `InputManagerGlobal.injectInputEvent` with `MotionEvent.setDisplayId` and `setActionButton`,
 `IWindowManager` (`setDisplayImePolicy`, `getCurrentImeTouchRegion`, `getWindowInsets`) and
-`IActivityTaskManager` (`focusTopTask`, `getFocusedRootTaskInfo`). They can change in any Android release.
+`IActivityTaskManager` (`focusTopTask`, `getFocusedRootTaskInfo`, `getAllRootTaskInfos`,
+`moveRootTaskToDisplay`). They can change in any Android release.
 
 ## Layout
 
