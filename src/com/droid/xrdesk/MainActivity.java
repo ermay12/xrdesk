@@ -31,11 +31,12 @@ import android.widget.TextView;
 import rikka.shizuku.Shizuku;
 
 /**
- * The app's screen: shows the stabilizer's status and starts, pauses, recenters and stops it,
- * with a number box for the drift time, sliders for the largest compensated rotation sideways and
- * up and down, and a drop-down of drift curves (all applied right away). The Mouse button is
- * pinned to the bottom and large, to find with a thumb while wearing the glasses.
- * Starting asks for Shizuku permission the first time. Over adb:
+ * The app's screen: shows the stabilizer's status and starts, recenters and stops it, with a
+ * number box for the drift time, sliders for the largest compensated rotation sideways and up and
+ * down, and a drop-down of drift curves (all applied right away). The Mouse button is pinned to
+ * the bottom and large, to find with a thumb while wearing the glasses. Stabilizing starts by
+ * itself when the app opens (once, so stopping it sticks while the app stays open); starting
+ * asks for Shizuku permission the first time. Over adb:
  *   am start -n com.droid.xrdesk/.MainActivity --ez start true [--es options "key=value ..."]
  */
 public class MainActivity extends Activity {
@@ -55,7 +56,6 @@ public class MainActivity extends Activity {
     private TextView mStatus;
     private TextView mOptionsText;
     private Button mStartStop;
-    private Button mPause;
     private Button mRecenter;
     private TextView mDriftLabel;
     private EditText mDriftInput;
@@ -65,6 +65,7 @@ public class MainActivity extends Activity {
     private SeekBar mPitch;
     private Spinner mCurve;
     private boolean mStartWhenReady;
+    private boolean mStartOnOpen;       // start stabilizing once the notification permission is settled
 
     private final Shizuku.OnRequestPermissionResultListener mPermissionListener = (requestCode, result) -> {
         if (requestCode != SHIZUKU_REQUEST) {
@@ -112,14 +113,13 @@ public class MainActivity extends Activity {
         TextView title = text("XR Desk", 28);
         mStatus = text("", 18);
         mStatus.setPadding(0, 24, 0, 24);
-        mStartStop = button("Start", v -> {
+        mStartStop = button("Start Stabilization", v -> {
             if (StabilizerService.stabilizing()) {
                 send(StabilizerService.ACTION_STOP);
             } else {
                 start();
             }
         });
-        mPause = button("Pause", v -> send(StabilizerService.ACTION_PAUSE));
         mRecenter = button("Recenter", v -> send(StabilizerService.ACTION_RECENTER));
         Button mouse = button("Mouse", v -> {
             v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
@@ -198,7 +198,6 @@ public class MainActivity extends Activity {
         root.addView(title);
         root.addView(mStatus);
         root.addView(mStartStop);
-        root.addView(mPause);
         root.addView(mRecenter);
         root.addView(mDriftLabel);
         root.addView(mDriftInput);
@@ -221,10 +220,31 @@ public class MainActivity extends Activity {
 
         Shizuku.addRequestPermissionResultListener(mPermissionListener, mMain);
         Shizuku.addBinderReceivedListenerSticky(mBinderListener, mMain);
-        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_REQUEST);
-        }
+        mStartOnOpen = savedInstanceState == null;  // not when recreated, e.g. after a rotation
         handleIntent(getIntent());
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            // Starting waits for the answer, so Shizuku's permission prompt doesn't cover this one.
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_REQUEST);
+        } else {
+            startOnOpen();
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode == NOTIFICATION_REQUEST) {
+            startOnOpen();  // stabilizing works without notifications; they just don't show
+        }
+    }
+
+    /** Starts stabilizing if the app just opened (or adb asked) and it isn't already. */
+    private void startOnOpen() {
+        if (mStartOnOpen) {
+            mStartOnOpen = false;
+            if (!StabilizerService.stabilizing()) {
+                start();
+            }
+        }
     }
 
     /** singleTask: a later `am start` arrives here instead of onCreate. */
@@ -233,6 +253,7 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         handleIntent(intent);
+        startOnOpen();
         loadSliders();
     }
 
@@ -243,8 +264,8 @@ public class MainActivity extends Activity {
             Options.save(this, options);
             send(StabilizerService.ACTION_RELOAD);
         }
-        if (intent.getBooleanExtra("start", false) && !StabilizerService.stabilizing()) {
-            start();
+        if (intent.getBooleanExtra("start", false)) {
+            mStartOnOpen = true;
         }
         if (intent.getBooleanExtra("mouse", false)) {
             startActivity(new Intent(this, MouseActivity.class));
@@ -341,7 +362,7 @@ public class MainActivity extends Activity {
             mMain.postDelayed(() -> {
                 if (mStartWhenReady && !Shizuku.pingBinder()) {
                     mStartWhenReady = false;
-                    mStatus.setText("Shizuku isn't running. Start it in the Shizuku app, then press Start.");
+                    mStatus.setText("Shizuku isn't running. Start it in the Shizuku app, then press Start Stabilization.");
                 }
             }, 3000);
             return;
@@ -374,9 +395,7 @@ public class MainActivity extends Activity {
         if (!mStartWhenReady) {
             mStatus.setText(StabilizerService.status());
         }
-        mStartStop.setText(running ? "Stop" : "Start");
-        mPause.setText(StabilizerService.paused() ? "Resume" : "Pause");
-        mPause.setEnabled(running);
+        mStartStop.setText(running ? "Stop Stabilization" : "Start Stabilization");
         mRecenter.setEnabled(running);
         String options = Options.load(this).text;
         mOptionsText.setText(options.isEmpty() ? "Options: defaults" : "Options: " + options);

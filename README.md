@@ -22,8 +22,8 @@ Note that the mouse cursor looks normal in the glasses, but doesn't show up in s
 ### Screenshots
 
 <p>
-  <img src="docs/main-screen.png" width="270" alt="Main screen: Stop, Pause, Recenter and Mouse, the drift time, max rotation and drift curve">
-  <img src="docs/mouse-screen.png" width="270" alt="Mouse screen: Back, Center cursor, Center screen, mouse speed, Right and Left click, the scroll strip and Type">
+  <img src="docs/main-screen.png" width="270" alt="Main screen: Stop Stabilization, Recenter and Mouse, the drift time, max rotation and drift curve">
+  <img src="docs/mouse-screen.png" width="270" alt="Mouse screen: Back, Center cursor, Center screen, mouse speed, Right and Left click and the scroll strip">
 </p>
 
 ## Features
@@ -54,8 +54,8 @@ Note that the mouse cursor looks normal in the glasses, but doesn't show up in s
 2. **Install XR Desk**: download the latest `xrdesk-<version>.apk` from
    [Releases](https://github.com/ermay12/xrdesk/releases/latest) on the phone and open it. Allow
    installing apps from your browser or file manager when asked.
-3. **Plug in the glasses, open XR Desk and tap Start.** Allow XR Desk to use Shizuku, to show
-   notifications, and to access the glasses. For the glasses, choose **Always allow**, so you
+3. **Plug in the glasses and open XR Desk.** Stabilization starts by itself. Allow XR Desk to
+   use Shizuku, to show notifications, and to access the glasses. For the glasses, choose **Always allow**, so you
    aren't asked again each time you plug them in.
 
 Why Shizuku? Moving the glasses' picture, sending mouse input to the glasses and showing their
@@ -66,14 +66,15 @@ them through Android's own debugging access, without rooting the phone.
 
 ### Stabilization
 
-- **Start / Stop** turns stabilization on and off. **Pause** keeps XR Desk running but leaves the
-  picture still; **Recenter** puts it back in the middle. The notification has the same buttons.
+- Stabilization starts when you open XR Desk. **Stop Stabilization** / **Start Stabilization**
+  turns it off and on; **Recenter** puts the picture back in the middle. The notification has
+  Recenter and Stop Stabilization too.
 - **Drift back to center** is how long the picture takes to come back after you move your head,
   in seconds; higher is slower. **Max side-to-side rotation (yaw)** and **Max up-and-down
   rotation (pitch)** are how far it compensates in each direction before following you.
 - **Drift back curve**: _Speed up_ (the default) accelerates then stops suddenly, _Smooth_ eases
   in and out, _Exponential_ is fastest at first, and _Linear_ moves at a constant speed.
-- XR Desk stops when you unplug the glasses; tap Start again after plugging them back in.
+- XR Desk stops when you unplug the glasses; tap Start Stabilization after plugging them back in.
 
 ### Mouse
 
@@ -96,8 +97,7 @@ wearing the glasses. It works with or without stabilization.
 On the mouse screen, click a text box on the glasses and your phone's keyboard opens, with a short
 buzz so you know without looking; type as usual. The buttons fill the space above the keyboard,
 and typing ends by itself when the keyboard closes (or press Back). After closing the keyboard,
-click the text box again to bring it back. **Type** starts typing by hand, for apps that don't
-open the keyboard themselves.
+click the text box again to bring it back.
 
 ## Known limits
 

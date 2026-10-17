@@ -60,9 +60,7 @@ import android.widget.TextView;
  * when touched (else tapping a button would close the keyboard), the phone gives a short buzz as
  * the keyboard opens, the controls fill the space between the status and the keyboard, and the
  * mode ends by itself once the keyboard closes. Volume down can't reach this screen meanwhile.
- * The Type button switches typing mode by hand, for apps that don't open the keyboard themselves;
- * the controls only move up while a keyboard is actually showing. The system Back only closes
- * the keyboard; the Back button at the top leaves this screen.
+ * The system Back only closes the keyboard; the Back button at the top leaves this screen.
  *
  * <p>Click lock: pressing a button jolts the phone, which would turn a click into a small drag.
  * So the cursor freezes while a button is held, until the phone turns past DRAG_START_RAD (a
@@ -70,10 +68,8 @@ import android.widget.TextView;
  * meanwhile is absorbed into the center, so the cursor doesn't jump when it unfreezes.
  */
 public class MouseActivity extends Activity implements SensorEventListener {
-    private static final float SCROLL_HEIGHT_IN = 2.5f;
-    private static final float TYPE_BUTTON_HEIGHT_IN = 0.45f;
+    private static final float CONTROLS_HEIGHT_IN = 2.5f;  // the click buttons and the scroll strip
     private static final float KEYBOARD_BUZZ_SCALE = 0.6f;  // a gentle click as the keyboard opens
-    private static final int TYPING_COLOR = 0xFF1E4F8C;
     private static final float SCROLL_WIDTH_IN = 0.75f;
     private static final float SCROLL_NOTCH_IN = 0.15f;  // finger travel per wheel notch at scroll speed 1x
     private static final float DRAG_START_RAD = (float) Math.toRadians(3);
@@ -123,7 +119,6 @@ public class MouseActivity extends Activity implements SensorEventListener {
     private int mSamples;
     private long mStatsSinceMs;
     private long mKeyboardWaitUntilMs;
-    private boolean mKeyboardSeen;      // typing mode: the keyboard has shown since it started
     private int mKeyboardGoneChecks;
 
     private float mScrollNotchPx;       // main thread
@@ -132,7 +127,6 @@ public class MouseActivity extends Activity implements SensorEventListener {
     private Insets mBars = Insets.NONE;
     private View mSettings;             // the speed sliders and scroll switch
     private View mBlock;
-    private GradientDrawable mTypeBg;
     private TextView mSpeedXLabel;
     private SeekBar mSpeedX;
     private TextView mSpeedYLabel;
@@ -226,8 +220,8 @@ public class MouseActivity extends Activity implements SensorEventListener {
         mSettings = settingsScroll;
         root.addView(settingsScroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        // Bottom: two columns of the same height. Left: Right click above Left click. Right: the
-        // scroll strip above the Type button. Above a keyboard they take the settings' room too.
+        // Bottom: Right click above Left click, the scroll strip beside them. Above a keyboard
+        // they take the settings' room too.
         LinearLayout block = new LinearLayout(this);
         mBlock = block;
         LinearLayout clicks = new LinearLayout(this);
@@ -235,25 +229,10 @@ public class MouseActivity extends Activity implements SensorEventListener {
         clicks.addView(clickButton("Right click", MotionEvent.BUTTON_SECONDARY), weightedHeight(0, 0, 0, 8));
         clicks.addView(clickButton("Left click", MotionEvent.BUTTON_PRIMARY), weightedHeight(0, 8, 0, 0));
         block.addView(clicks, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
-        LinearLayout side = new LinearLayout(this);
-        side.setOrientation(LinearLayout.VERTICAL);
-        side.addView(scrollStrip(), new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-        mTypeBg = rounded(BUTTON_COLOR);
-        TextView type = label("Type");
-        type.setTextSize(16);
-        type.setBackground(mTypeBg);
-        type.setOnClickListener(v -> {
-            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-            setTyping(!mTyping);
-        });
-        LinearLayout.LayoutParams typeParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, Math.round(inches(TYPE_BUTTON_HEIGHT_IN)));
-        typeParams.topMargin = 16;
-        side.addView(type, typeParams);
-        LinearLayout.LayoutParams sideParams = new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
                 Math.round(inches(SCROLL_WIDTH_IN)), LinearLayout.LayoutParams.MATCH_PARENT);
-        sideParams.leftMargin = 16;
-        block.addView(side, sideParams);
+        scrollParams.leftMargin = 16;
+        block.addView(scrollStrip(), scrollParams);
         root.addView(block, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, blockHeight()));
         setContentView(root);
     }
@@ -335,9 +314,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
 
     private void showStatus() {
         if (mTyping) {
-            mStatus.setText(mKeyboardTop >= 0
-                    ? "Typing on the glasses. Ends when the keyboard closes, or press Back or Type."
-                    : "Click a text box on the glasses to type. Type or Back cancels.");
+            mStatus.setText("Typing on the glasses. Ends when the keyboard closes.");
         } else {
             mStatus.setText(StabilizerService.stabilizing()
                     ? "Point with the top of the phone. Volume down centers the cursor. Click a text box to type."
@@ -358,7 +335,6 @@ public class MouseActivity extends Activity implements SensorEventListener {
             helper.focusDisplay(StabilizerService.displayId());  // already there after a click
             mPointer.post(() -> {
                 mPointer.removeCallbacks(mAfterClick);
-                mKeyboardSeen = false;
                 mKeyboardGoneChecks = 0;
                 mPointer.removeCallbacks(mWatchKeyboard);
                 mPointer.postDelayed(mWatchKeyboard, KEYBOARD_WATCH_MS);
@@ -369,7 +345,6 @@ public class MouseActivity extends Activity implements SensorEventListener {
                 helper.focusDisplay(mHomeDisplay);  // volume keys reach this screen again
             }
         }
-        mTypeBg.setColor(on ? TYPING_COLOR : BUTTON_COLOR);
         if (!on) {
             keyboardShown(-1);
         }
@@ -378,8 +353,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
 
     /**
      * Main thread. While a keyboard is on screen (top: its top edge, screen px; -1 = none), the
-     * controls fill the space between the status and it; typing mode alone (Type pressed outside
-     * a text box) doesn't move them. The phone buzzes as a keyboard opens.
+     * controls fill the space between the status and it. The phone buzzes as a keyboard opens.
      */
     private void keyboardShown(int top) {
         if (top == mKeyboardTop) {
@@ -473,8 +447,9 @@ public class MouseActivity extends Activity implements SensorEventListener {
     };
 
     /**
-     * Pointer thread, in typing mode: fits the controls above the keyboard while it shows (it can
-     * change height), and ends typing mode once the keyboard has shown and then closed.
+     * Pointer thread, in typing mode (which starts with a keyboard showing): fits the controls
+     * above the keyboard while it shows (it can change height), and ends typing mode once it has
+     * been gone for two checks in a row.
      */
     private final Runnable mWatchKeyboard = new Runnable() {
         @Override
@@ -485,9 +460,8 @@ public class MouseActivity extends Activity implements SensorEventListener {
             }
             int top = helper.keyboardTop();
             if (top >= 0) {
-                mKeyboardSeen = true;
                 mKeyboardGoneChecks = 0;
-            } else if (mKeyboardSeen && ++mKeyboardGoneChecks >= 2) {
+            } else if (++mKeyboardGoneChecks >= 2) {
                 mMain.post(() -> setTyping(false));
                 return;
             }
@@ -751,9 +725,9 @@ public class MouseActivity extends Activity implements SensorEventListener {
         return p;
     }
 
-    /** Both columns: the scroll strip (or the click buttons) plus the Type button below it. */
+    /** The click buttons and the scroll strip, when no keyboard is showing. */
     private int blockHeight() {
-        return Math.round(inches(SCROLL_HEIGHT_IN + TYPE_BUTTON_HEIGHT_IN)) + 16;
+        return Math.round(inches(CONTROLS_HEIGHT_IN));
     }
 
     private TextView speedLabel() {

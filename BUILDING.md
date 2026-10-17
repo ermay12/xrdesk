@@ -31,8 +31,8 @@ Connect the phone with adb (USB, or **Developer options → Wireless debugging**
 ```sh
 ./xrdesk.sh test                  # JVM unit tests, no phone needed
 ./xrdesk.sh install               # build a debuggable APK and install it
-./xrdesk.sh start                 # start stabilizing (same as Start in the app)
-./xrdesk.sh stop | pause | recenter
+./xrdesk.sh start                 # start stabilizing (as opening the app does)
+./xrdesk.sh stop | recenter
 ./xrdesk.sh mouse                 # open the mouse screen
 ./xrdesk.sh options drift=3 maxyaw=800   # save settings, applied right away; none = defaults
 ./xrdesk.sh log                   # follow the log (tag XRDesk)

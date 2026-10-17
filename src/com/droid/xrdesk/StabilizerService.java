@@ -46,7 +46,6 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     static final String ACTION_STOP = "com.droid.xrdesk.action.STOP";        // stop stabilizing
     static final String ACTION_MOUSE_ON = "com.droid.xrdesk.action.MOUSE_ON";
     static final String ACTION_MOUSE_OFF = "com.droid.xrdesk.action.MOUSE_OFF";
-    static final String ACTION_PAUSE = "com.droid.xrdesk.action.PAUSE";  // toggles
     static final String ACTION_RECENTER = "com.droid.xrdesk.action.RECENTER";
     static final String ACTION_RELOAD = "com.droid.xrdesk.action.RELOAD";  // settings changed
     private static final String CHANNEL = "stabilizer";
@@ -56,7 +55,6 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     private static volatile String sStatus = "Stopped";
     private static volatile StabilizerService sInstance;
     private static volatile boolean sRunning;
-    private static volatile boolean sPaused;
     private static volatile boolean sStabilizing;  // wanted, main thread writes
     private static volatile boolean sMouseOn;
 
@@ -66,10 +64,6 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
 
     static boolean running() {
         return sRunning;
-    }
-
-    static boolean paused() {
-        return sPaused;
     }
 
     /** Running and stabilizing (not just serving the mouse screen). */
@@ -125,7 +119,6 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         super.onCreate();
         sInstance = this;
         sRunning = true;
-        sPaused = false;
         sStabilizing = false;  // set by the start actions
         sMouseOn = false;
         getSystemService(NotificationManager.class).createNotificationChannel(
@@ -169,11 +162,6 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         } else if (ACTION_MOUSE_OFF.equals(action)) {
             sMouseOn = false;
             stopIfUnused();
-        } else if (ACTION_PAUSE.equals(action)) {
-            sPaused = !sPaused;
-            Log.i(TAG, sPaused ? "paused" : "resumed");
-            mStab.post(this::recenter);
-            setStatus(sStatus);
         } else if (ACTION_RECENTER.equals(action)) {
             mStab.post(this::recenter);
         } else if (ACTION_RELOAD.equals(action)) {
@@ -262,7 +250,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         if (Shizuku.isPreV11()) {
             fail("This Shizuku version is too old. Update Shizuku.");
         } else if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-            fail("XR Desk isn't allowed to use Shizuku. Open XR Desk and press Start to allow it.");
+            fail("XR Desk isn't allowed to use Shizuku. Open XR Desk and press Start Stabilization to allow it.");
         } else {
             bindHelper();
         }
@@ -395,7 +383,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     private final Runnable mDrain = () -> {
         mDrainPending.set(false);  // before draining, so samples queued meanwhile post again
         RateRing ring = mImu.ring();
-        if (sPaused || !mStreaming) {
+        if (!mStreaming) {
             ring.clear();
             return;
         }
@@ -430,7 +418,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         mStabilizer.configure(o.focal, o.drift, o.maxYaw, o.maxPitch, o.predictMs / 1000f, o.deadband, o.curve);
     }
 
-    /** Stab thread. Back to center (also used when pausing, resuming or losing the IMU). */
+    /** Stab thread. Back to center (also used when stopping or losing the IMU). */
     private void recenter() {
         mStabilizer.reset();
         mLastSampleNs = 0;
@@ -452,9 +440,8 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         if (helper == null) {
             return;
         }
-        boolean active = !sPaused && mStreaming;
-        int x = active ? mStabilizer.x() : 0;
-        int y = active ? mStabilizer.y() : 0;
+        int x = mStreaming ? mStabilizer.x() : 0;
+        int y = mStreaming ? mStabilizer.y() : 0;
         long now = SystemClock.uptimeMillis();
         if (x == mSentX && y == mSentY && now - mSentAtMs < RESEND_MS) {
             return;
@@ -493,16 +480,17 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     private Notification notification(String text) {
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
                 PendingIntent.FLAG_IMMUTABLE);
-        return new Notification.Builder(this, CHANNEL)
+        Notification.Builder b = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_menu_view)
-                .setContentTitle(!sStabilizing ? "XR Desk (mouse)" : sPaused ? "XR Desk (paused)" : "XR Desk")
+                .setContentTitle(sStabilizing ? "XR Desk" : "XR Desk (mouse)")
                 .setContentText(text)
                 .setContentIntent(open)
-                .setOngoing(true)
-                .addAction(new Notification.Action.Builder(null, sPaused ? "Resume" : "Pause", action(ACTION_PAUSE, 1)).build())
-                .addAction(new Notification.Action.Builder(null, "Recenter", action(ACTION_RECENTER, 2)).build())
-                .addAction(new Notification.Action.Builder(null, "Stop", action(ACTION_STOP, 3)).build())
-                .build();
+                .setOngoing(true);
+        if (sStabilizing) {  // nothing to recenter or stop while only the mouse screen runs it
+            b.addAction(new Notification.Action.Builder(null, "Recenter", action(ACTION_RECENTER, 2)).build())
+                    .addAction(new Notification.Action.Builder(null, "Stop Stabilization", action(ACTION_STOP, 3)).build());
+        }
+        return b.build();
     }
 
     private PendingIntent action(String action, int requestCode) {

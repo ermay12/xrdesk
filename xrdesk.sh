@@ -8,7 +8,7 @@
 #   ./xrdesk.sh install              build and install (stops XR Desk first)
 #   ./xrdesk.sh start                start stabilizing (needs Shizuku running)
 #   ./xrdesk.sh stop                 stop; the glasses' picture goes back to normal
-#   ./xrdesk.sh pause | recenter     same as the notification buttons
+#   ./xrdesk.sh recenter             same as the notification button
 #   ./xrdesk.sh mouse                 open the mouse screen
 #   ./xrdesk.sh options [key=value...]  save settings, applied right away; none = defaults
 #   ./xrdesk.sh log                  follow the app's log
@@ -136,7 +136,6 @@ case "${1:-}" in
     start) adb shell am start -n "$PKG/.MainActivity" --display 0 --ez start true >/dev/null
         sleep 3; adb logcat -d -s XRDesk | tail -20 ;;
     stop) adb shell am force-stop "$PKG" ;;
-    pause) service_action PAUSE ;;
     mouse) adb shell am start -n "$PKG/.MainActivity" --display 0 --ez mouse true >/dev/null ;;
     recenter) service_action RECENTER ;;
     options) shift; adb shell "am start -n $PKG/.MainActivity --display 0 --es options '$*'" >/dev/null ;;
