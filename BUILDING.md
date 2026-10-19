@@ -98,11 +98,15 @@ phone's rotation sensor ──> MouseActivity ──moves, clicks, scroll──>
   and draws Android's own arrow pointer as a layer on the display's layer stack, so it's
   stabilized with the picture. The layer is a *trusted overlay*: Android drops touches on a
   window that another app's surface covers, and the arrow covers the very pixel being clicked.
+- Focus: Android has one input focus, and a click on the glasses moves it there. Touching the
+  mouse screen would pull it back to the phone, so while the mouse screen isn't the top resumed
+  activity (`onTopResumedActivityChanged`), its window is `FLAG_NOT_FOCUSABLE`. Focus then stays
+  on the glasses until something on the phone takes it (like the notification shade), and
+  leaving the mouse screen hands it back to the phone (`focusTopTask`).
 - Typing: while the mouse screen is open, the glasses' keyboard policy is "show it on the phone"
-  (`IWindowManager.setDisplayImePolicy`). Android has one input focus, and a click on the glasses
-  moves it there; after a click, focus stays there for up to 0.9 s while the helper checks
-  whether a keyboard opened (IME touch region and visible IME insets). If one did, typing mode
-  starts; otherwise focus goes back to the phone, so its volume keys reach the mouse screen.
+  (`IWindowManager.setDisplayImePolicy`). Typing mode starts when a keyboard opens (IME touch
+  region and visible IME insets); the app asks the helper every 50 ms for 0.9 s after a click,
+  when one usually opens, and every 0.3 s otherwise.
   Android moves focus a little after the press, and a text box asks for the keyboard on release
   only if its window has focus by then, so `MousePointer` holds a release until focus has
   reached the glasses (polling `IActivityTaskManager.getFocusedRootTaskInfo`) plus a margin,

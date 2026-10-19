@@ -82,16 +82,18 @@ them through Android's own debugging access, without rooting the phone.
 Tap **Mouse**, the big button at the bottom of the screen, easy to find with your thumb while
 wearing the glasses. It works with or without stabilization.
 
-- **Point** with the top edge of the phone. **Volume down** or **Center cursor** puts the cursor
-  back in the middle; **Center screen** recenters the stabilized picture.
+- **Point** with the top edge of the phone. **Center cursor** puts the cursor back in the middle;
+  **Center screen** recenters the stabilized picture.
+- After a click, the window you clicked keeps input focus while you use the mouse screen, and
+  the phone's volume buttons change the volume as usual.
 - **Right click** and **Left click** are at the bottom left; hold Left click and turn the phone
   to drag. The cursor holds still while you press, so a tap doesn't become a drag.
 - **Scroll** by dragging up and down on the scroll strip: drag down to scroll down, like a scroll
   bar, or switch on **Reverse scroll direction** to drag the page like a touch screen.
 - The two **Mouse speed** sliders set how far the cursor moves when you turn the phone side to
   side and when you tilt it up and down; **Scroll speed** sets how far a drag scrolls.
-- Leave with the **Back** button at the top. (The phone's own Back gesture only closes the
-  keyboard here, so you can't leave by accident.)
+- Leave with the **Back** button at the top. (The phone's own Back gesture doesn't leave the
+  mouse screen, so you can't leave by accident.)
 
 ### Typing
 

@@ -45,7 +45,7 @@ public class ProjectionHelper extends Binder {
     static final int MOUSE_SHOW = FIRST_CALL_TRANSACTION + 4;
     /** In: float x, float y (display pixels). */
     static final int MOUSE_MOVE = FIRST_CALL_TRANSACTION + 5;
-    /** In: int MotionEvent button, boolean down, int display to refocus after the last release (-1 = none). */
+    /** In: int MotionEvent button, boolean down. */
     static final int MOUSE_BUTTON = FIRST_CALL_TRANSACTION + 6;
     /** In: float wheel notches, positive = up. */
     static final int MOUSE_SCROLL = FIRST_CALL_TRANSACTION + 7;
@@ -156,7 +156,7 @@ public class ProjectionHelper extends Binder {
                 } else if (code == MOUSE_MOVE) {
                     mouse.move(data.readFloat(), data.readFloat());
                 } else if (code == MOUSE_BUTTON) {
-                    mouse.button(data.readInt(), data.readBoolean(), data.readInt());
+                    mouse.button(data.readInt(), data.readBoolean());
                 } else {
                     mouse.scroll(data.readFloat());
                 }

@@ -90,11 +90,10 @@ final class Helper {
         oneway(ProjectionHelper.MOUSE_MOVE, data);
     }
 
-    void mouseButton(int button, boolean down, int homeDisplay) {
+    void mouseButton(int button, boolean down) {
         Parcel data = start();
         data.writeInt(button);
         data.writeBoolean(down);
-        data.writeInt(homeDisplay);
         oneway(ProjectionHelper.MOUSE_BUTTON, data);
     }
 

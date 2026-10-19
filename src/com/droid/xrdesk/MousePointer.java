@@ -31,8 +31,7 @@ import java.lang.reflect.Method;
  * with the picture.
  *
  * <p>A click moves input focus to the clicked window's display (and brings the window to the
- * front); after the last button is released, focus goes back to {@code homeDisplay} (where the
- * mouse screen is) so the phone's volume keys keep reaching the app.
+ * front), where the mouse screen then leaves it.
  *
  * <p>Android moves focus a little after the press (about 30 ms later on an emulator), and a text
  * box asks for the keyboard on release only if its window has focus by then; otherwise no
@@ -98,7 +97,7 @@ final class MousePointer {
             } else {
                 for (int button : new int[]{MotionEvent.BUTTON_PRIMARY, MotionEvent.BUTTON_SECONDARY}) {
                     if ((mButtons & button) != 0) {
-                        button(button, false, -1);
+                        button(button, false);
                     }
                 }
                 if (mHovering) {
@@ -128,8 +127,8 @@ final class MousePointer {
         }
     }
 
-    /** button: MotionEvent.BUTTON_PRIMARY or BUTTON_SECONDARY. homeDisplay: refocus after the last release, or -1. */
-    synchronized void button(int button, boolean down, int homeDisplay) {
+    /** button: MotionEvent.BUTTON_PRIMARY or BUTTON_SECONDARY. */
+    synchronized void button(int button, boolean down) {
         if (!mShown || down == ((mButtons & button) != 0)) {
             return;
         }
@@ -155,9 +154,6 @@ final class MousePointer {
                 waitForFocus();
                 inject(MotionEvent.ACTION_UP, mDownTime, 0, 0f);
                 hover(MotionEvent.ACTION_HOVER_ENTER);
-                if (homeDisplay >= 0) {
-                    focusDisplay(homeDisplay);
-                }
             }
         }
     }

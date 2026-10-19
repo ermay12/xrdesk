@@ -26,7 +26,6 @@ import android.util.TypedValue;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
-import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
@@ -40,7 +39,7 @@ import android.widget.TextView;
 
 /**
  * The mouse screen: the phone becomes a mouse for the glasses. Where the phone's top edge points
- * sets the cursor, like a laser pointer; volume down recenters it. At the bottom, a block as tall
+ * sets the cursor, like a laser pointer; Center cursor recenters it. At the bottom, a block as tall
  * as the scroll strip holds Right click above Left click, with the scroll strip on the right
  * (drag down to scroll down, unless reversed). Above them are the mouse and scroll settings. The
  * pointer itself runs in the shell helper (MousePointer); this screen starts StabilizerService in
@@ -52,14 +51,18 @@ import android.widget.TextView;
  * of that elevation, so a horizontal sweep is a straight line at the same speed however the phone
  * is tilted. Samples are handled on their own thread with the button and scroll events, in order.
  *
+ * <p>Focus: Android has one input focus, and a click on the glasses moves it there. It stays
+ * there: while the phone's display doesn't have focus, this screen doesn't take it when touched
+ * (else every tap on a button would pull it back to the phone, and close the glasses'
+ * keyboard). Something on the phone that takes focus, like the notification shade, brings it
+ * back here until the next click; leaving this screen gives it back to the phone.
+ *
  * <p>Typing: while this screen is open, the glasses' keyboard shows on the phone (Gboard, with
- * autocorrect), typing straight into the text field clicked on the glasses. That needs input
- * focus on the glasses, so after a click focus stays there for up to KEYBOARD_WAIT_MS while the
- * helper checks whether a keyboard opened: if so, typing mode starts by itself; if not, focus
- * goes back to the phone for the volume keys. In typing mode this screen stops taking focus
- * when touched (else tapping a button would close the keyboard), the phone gives a short buzz as
- * the keyboard opens, the controls fill the space between the status and the keyboard, and the
- * mode ends by itself once the keyboard closes. Volume down can't reach this screen meanwhile.
+ * autocorrect), typing straight into the text field clicked on the glasses. Typing mode starts
+ * by itself when a keyboard opens, which is usually right after a click, so the helper is asked
+ * every KEYBOARD_POLL_MS for KEYBOARD_WAIT_MS after one and every KEYBOARD_WATCH_MS otherwise.
+ * In typing mode the phone gives a short buzz as the keyboard opens, the controls fill the space
+ * between the status and the keyboard, and the mode ends by itself once the keyboard closes.
  * The system Back only closes the keyboard; the Back button at the top leaves this screen.
  *
  * <p>Click lock: pressing a button jolts the phone, which would turn a click into a small drag.
@@ -75,8 +78,8 @@ public class MouseActivity extends Activity implements SensorEventListener {
     private static final float DRAG_START_RAD = (float) Math.toRadians(3);
     private static final long RELEASE_HOLD_MS = 250;
     private static final long KEYBOARD_WAIT_MS = 900;     // after a click (whose release may wait 300 ms), for a keyboard
-    private static final long KEYBOARD_POLL_MS = 50;
-    private static final long KEYBOARD_WATCH_MS = 300;    // in typing mode, for it to close
+    private static final long KEYBOARD_POLL_MS = 50;      // meanwhile
+    private static final long KEYBOARD_WATCH_MS = 300;    // otherwise, for one to open or close
     private static final String SIDEWAYS = "side to side";
     private static final String UP_AND_DOWN = "up and down";
     private static final int BUTTON_COLOR = 0xFF2A2A2A;
@@ -259,6 +262,10 @@ public class MouseActivity extends Activity implements SensorEventListener {
         super.onPause();
         mMain.removeCallbacks(mWatch);
         setTyping(false);
+        Helper helper = mHelper;
+        if (isFinishing() && helper != null) {
+            helper.focusDisplay(mHomeDisplay);  // for the screen underneath, if the glasses have it
+        }
         disconnect();
         if (StabilizerService.running()) {
             startService(new Intent(this, StabilizerService.class).setAction(StabilizerService.ACTION_MOUSE_OFF));
@@ -269,6 +276,21 @@ public class MouseActivity extends Activity implements SensorEventListener {
     protected void onDestroy() {
         super.onDestroy();
         mPointerThread.quitSafely();
+    }
+
+    /**
+     * Whether input focus is on the phone's display (with this screen on top) or elsewhere, as
+     * after a click on the glasses. Only while it's on the phone may touching this screen take
+     * it; see the class comment.
+     */
+    @Override
+    public void onTopResumedActivityChanged(boolean top) {
+        super.onTopResumedActivityChanged(top);
+        if (top) {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
+        } else {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
+        }
     }
 
     /** (Re)connects to the helper and shows the cursor on its display. */
@@ -307,6 +329,8 @@ public class MouseActivity extends Activity implements SensorEventListener {
                 Log.w(TAG, "couldn't move the glasses' keyboard to the phone");
             }
             mHelper = helper;
+            mKeyboardGoneChecks = 0;
+            mPointer.postDelayed(mWatchKeyboard, KEYBOARD_WATCH_MS);
         });
         mSensors.registerListener(this, mRotation, 10_000 /* us */, mPointer);
         showStatus();
@@ -317,34 +341,18 @@ public class MouseActivity extends Activity implements SensorEventListener {
             mStatus.setText("Typing on the glasses. Ends when the keyboard closes.");
         } else {
             mStatus.setText(StabilizerService.stabilizing()
-                    ? "Point with the top of the phone. Volume down centers the cursor. Click a text box to type."
-                    : "Mouse only (not stabilizing). Volume down centers the cursor. Click a text box to type.");
+                    ? "Point with the top of the phone. Click a text box to type."
+                    : "Mouse only (not stabilizing). Click a text box to type.");
         }
     }
 
     /** Typing mode on/off (main thread); see the class comment. */
     private void setTyping(boolean on) {
-        Helper helper = mHelper;
-        if (on == mTyping || (on && helper == null)) {
+        if (on == mTyping || (on && mHelper == null)) {
             return;
         }
         mTyping = on;
         Log.i(TAG, "typing mode " + (on ? "on" : "off"));
-        if (on) {
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
-            helper.focusDisplay(StabilizerService.displayId());  // already there after a click
-            mPointer.post(() -> {
-                mPointer.removeCallbacks(mAfterClick);
-                mKeyboardGoneChecks = 0;
-                mPointer.removeCallbacks(mWatchKeyboard);
-                mPointer.postDelayed(mWatchKeyboard, KEYBOARD_WATCH_MS);
-            });
-        } else {
-            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
-            if (helper != null) {
-                helper.focusDisplay(mHomeDisplay);  // volume keys reach this screen again
-            }
-        }
         if (!on) {
             keyboardShown(-1);
         }
@@ -410,7 +418,6 @@ public class MouseActivity extends Activity implements SensorEventListener {
         mPointer.post(() -> {
             Helper helper = mHelper;
             mHelper = null;
-            mPointer.removeCallbacks(mAfterClick);
             mPointer.removeCallbacks(mWatchKeyboard);
             if (helper != null) {
                 helper.mouseShow(false);  // also releases any held button
@@ -424,53 +431,37 @@ public class MouseActivity extends Activity implements SensorEventListener {
         feedback.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
     }
 
-    /** Pointer thread, after a click: a keyboard opened means typing; else focus back to the phone. */
-    private final Runnable mAfterClick = new Runnable() {
-        @Override
-        public void run() {
-            Helper helper = mHelper;
-            if (helper == null || mTyping) {
-                return;
-            }
-            int top = helper.keyboardTop();
-            if (top >= 0) {
-                mMain.post(() -> {
-                    setTyping(true);
-                    keyboardShown(top);
-                });
-            } else if (SystemClock.uptimeMillis() < mKeyboardWaitUntilMs) {
-                mPointer.postDelayed(this, KEYBOARD_POLL_MS);
-            } else {
-                helper.focusDisplay(mHomeDisplay);  // volume keys reach this screen again
-            }
-        }
-    };
-
     /**
-     * Pointer thread, in typing mode (which starts with a keyboard showing): fits the controls
-     * above the keyboard while it shows (it can change height), and ends typing mode once it has
-     * been gone for two checks in a row.
+     * Pointer thread, while the mouse is on: a keyboard showing starts typing mode, which fits the
+     * controls above it (it can change height), and ends once it has been gone for two checks in
+     * a row. Asks often while a click may still open one.
      */
     private final Runnable mWatchKeyboard = new Runnable() {
         @Override
         public void run() {
             Helper helper = mHelper;
-            if (helper == null || !mTyping) {
+            if (helper == null) {
                 return;
             }
             int top = helper.keyboardTop();
             if (top >= 0) {
                 mKeyboardGoneChecks = 0;
-            } else if (++mKeyboardGoneChecks >= 2) {
-                mMain.post(() -> setTyping(false));
-                return;
-            }
-            mMain.post(() -> {
-                if (mTyping) {
+                mMain.post(() -> {
+                    setTyping(true);
                     keyboardShown(top);
-                }
-            });
-            mPointer.postDelayed(this, KEYBOARD_WATCH_MS);
+                });
+            } else if (mTyping) {
+                boolean gone = ++mKeyboardGoneChecks >= 2;
+                mMain.post(() -> {
+                    if (gone) {
+                        setTyping(false);
+                    } else if (mTyping) {
+                        keyboardShown(top);
+                    }
+                });
+            }
+            boolean waiting = top < 0 && !mTyping && SystemClock.uptimeMillis() < mKeyboardWaitUntilMs;
+            mPointer.postDelayed(this, waiting ? KEYBOARD_POLL_MS : KEYBOARD_WATCH_MS);
         }
     };
 
@@ -484,22 +475,6 @@ public class MouseActivity extends Activity implements SensorEventListener {
         if (mTyping) {
             setTyping(false);
         }
-    }
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            if (event.getRepeatCount() == 0) {
-                recenter(mStatus);
-            }
-            return true;
-        }
-        return super.onKeyDown(keyCode, event);
-    }
-
-    @Override
-    public boolean onKeyUp(int keyCode, KeyEvent event) {
-        return keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || super.onKeyUp(keyCode, event);
     }
 
     // ---- Pointing ----
@@ -603,7 +578,6 @@ public class MouseActivity extends Activity implements SensorEventListener {
                 bg.setColor(PRESSED_COLOR);
                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
                 mPointer.post(() -> {
-                    mPointer.removeCallbacks(mAfterClick);  // this click's release decides again
                     if (mButtonsDown == 0) {
                         mDragging = false;
                         mPressA = mA;
@@ -612,7 +586,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
                     mButtonsDown |= button;
                     Helper helper = mHelper;
                     if (helper != null) {
-                        helper.mouseButton(button, true, -1);
+                        helper.mouseButton(button, true);
                     }
                 });
             } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
@@ -622,14 +596,15 @@ public class MouseActivity extends Activity implements SensorEventListener {
                     mButtonsDown &= ~button;
                     Helper helper = mHelper;
                     if (helper != null) {
-                        helper.mouseButton(button, false, -1);  // focus stays on the glasses for now
+                        helper.mouseButton(button, false);
                     }
                     if (mButtonsDown == 0) {
                         mHoldUntilMs = SystemClock.uptimeMillis() + RELEASE_HOLD_MS;
                         if (!mTyping) {
-                            // Did the click open a keyboard? Typing mode if so, else focus back here.
+                            // Did the click open a keyboard? Ask often for a while.
                             mKeyboardWaitUntilMs = SystemClock.uptimeMillis() + KEYBOARD_WAIT_MS;
-                            mPointer.postDelayed(mAfterClick, KEYBOARD_POLL_MS);
+                            mPointer.removeCallbacks(mWatchKeyboard);
+                            mPointer.postDelayed(mWatchKeyboard, KEYBOARD_POLL_MS);
                         }
                     }
                 });
