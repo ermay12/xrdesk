@@ -48,17 +48,28 @@ release install and a development build.
 
 ## Releases
 
-```sh
-./xrdesk.sh release               # build/xrdesk-<versionName>.apk, not debuggable
-```
+Every push to `main` that changes more than docs (`*.md`, `docs/`) publishes a release: GitHub
+Actions (`.github/workflows/release.yml`) runs the unit tests, builds a release APK and creates
+release `v<versionName>.<build>`, listing the commits since the previous release. The build
+number is the number of commits on `main`, and it's also the APK's `versionCode`, so each build
+installs over the one before. For a new version, bump `versionName` in `AndroidManifest.xml`;
+the `versionCode` there is only used by local builds, which therefore won't install over a
+published one.
 
 The release key is not in the repo: `~/.android/xrdesk-release.jks`, with its password in
 `~/.android/xrdesk-release.pass` (override with `XRDESK_KEYSTORE` and `XRDESK_KEYSTORE_PASS_FILE`).
-Keep both backed up: updates to installed releases must be signed with the same key. To publish,
-bump `versionCode` and `versionName` in `AndroidManifest.xml`, build, then:
+Keep both backed up: updates to installed releases must be signed with the same key. The
+workflow reads them from two repository secrets, set once with:
 
 ```sh
-gh release create v<versionName> build/xrdesk-<versionName>.apk --title "XR Desk <versionName>"
+base64 -w0 ~/.android/xrdesk-release.jks | gh secret set XRDESK_KEYSTORE_BASE64
+gh secret set XRDESK_KEYSTORE_PASS < ~/.android/xrdesk-release.pass
+```
+
+To build a release APK locally:
+
+```sh
+./xrdesk.sh release               # build/xrdesk-<versionName>.apk, not debuggable
 ```
 
 ## How it works

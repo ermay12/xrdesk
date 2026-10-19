@@ -1,0 +1,79 @@
+# Every push to main (except one that only changes docs) runs the unit tests, builds a release APK
+# signed with the release key and publishes it as a new GitHub release, v<versionName>.<build>.
+# The key comes from two repository secrets, XRDESK_KEYSTORE_BASE64 and XRDESK_KEYSTORE_PASS; see
+# BUILDING.md.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+permissions:
+  contents: write  # to create the tag and the release
+
+concurrency:
+  group: release  # one at a time, in push order
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: debian:trixie  # the toolchain BUILDING.md documents
+    steps:
+      # Before checkout: without git it downloads the files without their history.
+      - name: Install the toolchain
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl unzip git gh \
+              openjdk-21-jdk-headless aapt apksigner zipalign
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # all commits and tags: the build number counts commits, the notes list them
+
+      - name: Set up sdk/ and libs/
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          ./xrdesk.sh setup
+
+      - name: Unit tests
+        run: ./xrdesk.sh test
+
+      # versionCode: the number of commits, so each build installs over the one before.
+      # versionName: the manifest's, plus that build number.
+      - name: Set the version
+        id: version
+        run: |
+          code=$(git rev-list --count HEAD)
+          name=$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' AndroidManifest.xml).$code
+          sed -i -e "s/android:versionCode=\"[0-9]*\"/android:versionCode=\"$code\"/" \
+              -e "s/android:versionName=\"[^\"]*\"/android:versionName=\"$name\"/" AndroidManifest.xml
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Build the release APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.XRDESK_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.XRDESK_KEYSTORE_PASS }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASS" ]; then
+              echo "::error::The XRDESK_KEYSTORE_BASE64 and XRDESK_KEYSTORE_PASS secrets aren't set (see BUILDING.md)"
+              exit 1
+          fi
+          export XRDESK_KEYSTORE=$RUNNER_TEMP/xrdesk-release.jks
+          export XRDESK_KEYSTORE_PASS_FILE=$RUNNER_TEMP/xrdesk-release.pass
+          echo "$KEYSTORE_BASE64" | base64 -d > "$XRDESK_KEYSTORE"
+          printf '%s\n' "$KEYSTORE_PASS" > "$XRDESK_KEYSTORE_PASS_FILE"
+          ./xrdesk.sh release
+          rm -f "$XRDESK_KEYSTORE" "$XRDESK_KEYSTORE_PASS_FILE"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ steps.version.outputs.name }}
+        run: |
+          prev=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          git log --format='- %s' ${prev:+"$prev..HEAD"} > "$RUNNER_TEMP/notes.md"
+          gh release create "v$NAME" "build/xrdesk-$NAME.apk" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "XR Desk $NAME" --notes-file "$RUNNER_TEMP/notes.md"
