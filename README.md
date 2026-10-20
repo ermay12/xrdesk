@@ -35,6 +35,8 @@ Note that the mouse cursor looks normal in the glasses, but doesn't show up in s
   left click, right click, drag and scroll.
 - **Phone as a keyboard**: click a text box on the glasses and your phone's keyboard opens,
   typing straight into it, autocorrect included.
+- **Picture size and position**: shrink the whole desktop inside the glasses' display or zoom
+  in on it, and move it where it's easiest to see.
 
 ## Requirements
 
@@ -68,14 +70,32 @@ them through Android's own debugging access, without rooting the phone.
 ### Stabilization
 
 - Stabilization starts when you open XR Desk. **Stop Stabilization** / **Start Stabilization**
-  turns it off and on; **Recenter** puts the picture back in the middle. The notification has
-  Recenter and Stop Stabilization too.
-- **Drift back to center** is how long the picture takes to come back after you move your head,
-  in seconds; higher is slower. **Max side-to-side rotation (yaw)** and **Max up-and-down
-  rotation (pitch)** are how far it compensates in each direction before following you.
+  turns it off and on; **Recenter** puts the picture back in the middle. Both are at the bottom
+  of the screen, just above Mouse. The notification has Recenter and Stop Stabilization too.
+- Tap **Stabilization settings** to tune it. **Drift back to center** is how long the picture
+  takes to come back after you move your head, in seconds; higher is slower. A large number,
+  like 400, anchors the picture: it stays put until you recenter. **Max side-to-side
+  rotation (yaw)** and **Max up-and-down rotation (pitch)** are how far it compensates in each
+  direction before following you.
 - **Drift back curve**: _Speed up_ (the default) accelerates then stops suddenly, _Smooth_ eases
   in and out, _Exponential_ is fastest at first, and _Linear_ moves at a constant speed.
 - XR Desk stops when you unplug the glasses; tap Start Stabilization after plugging them back in.
+
+### Picture size and position
+
+- Tap **Picture size and position** and watch the glasses while you adjust. Drag up and down
+  on **Size** to resize the whole desktop: down to 50%, with a black border around it, or up to
+  200%, which zooms in and cuts off its edges. Drag on **Move** to move it side to side or up and
+  down, even partly off the display (or, zoomed in, to see its edges). Only how far you drag
+  counts, not where you touch, and the phone ticks every 5% and clicks at the center and at 100%,
+  so you can do it without looking.
+- **Center picture** puts it back in the middle; **Full size** sets it back to 100%. Leave with
+  **Back** at the top. Recenter and the drift back go to the position you set.
+- They apply whether stabilizing or not: while either is changed, XR Desk keeps running after
+  Stop Stabilization, with its notification.
+- With a smaller picture, stabilization slides it into the border instead of cutting off its
+  edges. A smaller picture also uses fewer of the glasses' pixels, so small text gets a little
+  softer.
 
 ### Mouse
 

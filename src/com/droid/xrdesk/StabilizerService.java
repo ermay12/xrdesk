@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
@@ -34,21 +35,25 @@ import rikka.shizuku.Shizuku;
 /**
  * Stabilizes the glasses' whole display: reads head rotation from the glasses' IMU, turns it into
  * an offset (Stabilizer) and has the shell helper shift the display's picture by that much, at
- * most once per frame. Apps keep running natively on the display; nothing is redrawn.
+ * most once per frame. Apps keep running natively on the display; nothing is redrawn. The helper
+ * also sizes and places the picture as set (Options fill, offsetx, offsety), stabilizing or not.
  *
  * Threads: main (lifecycle, Shizuku, IMU state), "stab" (samples in, one move per vsync out) and
  * a worker for slow helper calls.
  */
 public class StabilizerService extends Service implements Choreographer.FrameCallback {
     private static final String TAG = "XRDesk";
-    // Two independent wishes keep this service running: stabilizing, and the mouse screen being
-    // open. Both need the shell helper; only stabilizing reads the glasses' IMU.
+    // Independent wishes keep this service running: stabilizing, the mouse screen or the picture
+    // screen being open, and a picture size or position other than the display's own
+    // (Options.adjusted). All need the shell helper; only stabilizing reads the glasses' IMU.
     static final String ACTION_START = "com.droid.xrdesk.action.START";      // stabilize
     static final String ACTION_STOP = "com.droid.xrdesk.action.STOP";        // stop stabilizing
     static final String ACTION_MOUSE_ON = "com.droid.xrdesk.action.MOUSE_ON";
     static final String ACTION_MOUSE_OFF = "com.droid.xrdesk.action.MOUSE_OFF";
+    static final String ACTION_PICTURE_ON = "com.droid.xrdesk.action.PICTURE_ON";
+    static final String ACTION_PICTURE_OFF = "com.droid.xrdesk.action.PICTURE_OFF";
     static final String ACTION_RECENTER = "com.droid.xrdesk.action.RECENTER";
-    static final String ACTION_RELOAD = "com.droid.xrdesk.action.RELOAD";  // settings changed
+    static final String ACTION_RELOAD = "com.droid.xrdesk.action.RELOAD";  // settings changed; doesn't start stabilizing
     private static final String CHANNEL = "stabilizer";
     private static final int NOTIFICATION_ID = 1;
     private static final long RESEND_MS = 500;  // in case the display manager reset the projection
@@ -58,6 +63,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     private static volatile boolean sRunning;
     private static volatile boolean sStabilizing;  // wanted, main thread writes
     private static volatile boolean sMouseOn;
+    private static volatile boolean sPictureOn;
 
     static String status() {
         return sStatus;
@@ -82,6 +88,26 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
     static int displayId() {
         StabilizerService s = sInstance;
         return s != null && s.mHelper != null ? s.mDisplayId : -1;
+    }
+
+    /** Applies changed settings, if running. */
+    static void reload(Context context) {
+        if (sRunning) {
+            context.startService(new Intent(context, StabilizerService.class).setAction(ACTION_RELOAD));
+        }
+    }
+
+    /**
+     * Applies changed settings, including the picture's size and position. Those hold while not
+     * stabilizing too, so if they're set and the service isn't running, this starts it (without
+     * stabilizing).
+     */
+    static void reloadPicture(Context context) {
+        if (!sRunning && Options.load(context).adjusted()) {
+            context.startForegroundService(new Intent(context, StabilizerService.class).setAction(ACTION_RELOAD));
+        } else {
+            reload(context);
+        }
     }
 
     private final Handler mMain = new Handler(Looper.getMainLooper());
@@ -122,6 +148,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         sRunning = true;
         sStabilizing = false;  // set by the start actions
         sMouseOn = false;
+        sPictureOn = false;
         getSystemService(NotificationManager.class).createNotificationChannel(
                 new NotificationChannel(CHANNEL, "Stabilizer", NotificationManager.IMPORTANCE_LOW));
         startForeground(NOTIFICATION_ID, notification("Starting…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
@@ -132,6 +159,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         mStab = new Handler(mStabThread.getLooper());
         mStab.post(() -> mChoreographer = Choreographer.getInstance());
         mStab.post(this::configure);
+        mStab.postDelayed(mResend, RESEND_MS);
         // Android opens its USB permission dialog on the glasses (the desktop display), where
         // it's easy to miss; the helper (attached before the IMU starts) moves it to the phone.
         mImu = new XrealImuSource(this, mImuListener, () -> {
@@ -164,25 +192,54 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
             setStabilizing(false);
         } else if (ACTION_MOUSE_ON.equals(action)) {
             sMouseOn = true;
-            if (!sStabilizing && mHelper != null) {
-                setStatus(MOUSE_ONLY);
-            }
+            showIdle();
         } else if (ACTION_MOUSE_OFF.equals(action)) {
             sMouseOn = false;
-            stopIfUnused();
+            if (!stopIfUnused()) {
+                showIdle();
+            }
+        } else if (ACTION_PICTURE_ON.equals(action)) {
+            sPictureOn = true;
+            showIdle();
+        } else if (ACTION_PICTURE_OFF.equals(action)) {
+            sPictureOn = false;
+            if (!stopIfUnused()) {
+                showIdle();
+            }
         } else if (ACTION_RECENTER.equals(action)) {
             mStab.post(this::recenter);
         } else if (ACTION_RELOAD.equals(action)) {
-            mOptions = Options.load(this);
-            Log.i(TAG, "options: " + mOptions.text);
+            Options o = Options.load(this);
+            mOptions = o;
+            Log.i(TAG, "options: " + o.text);
             mStab.post(this::configure);
+            Helper helper = mHelper;
+            if (helper != null) {
+                helper.layout(o.fill, o.offsetX, o.offsetY);
+            }
+            if (!stopIfUnused()) {
+                showIdle();
+            }
         }
         return START_NOT_STICKY;
     }
 
     private static final String MOUSE_ONLY = "Mouse only (not stabilizing)";
+    private static final String PICTURE_ONLY = "Not stabilizing; the picture size and position still apply";
 
-    /** Main thread. Starts or stops stabilizing; the service keeps running for the mouse screen. */
+    /** The status while running without stabilizing. */
+    private static String idleStatus() {
+        return sMouseOn ? MOUSE_ONLY : PICTURE_ONLY;
+    }
+
+    /** Main thread. Shows why the service runs if it isn't stabilizing, once the helper is attached. */
+    private void showIdle() {
+        if (!sStabilizing && mHelper != null && !idleStatus().equals(sStatus)) {
+            setStatus(idleStatus());
+        }
+    }
+
+    /** Main thread. Starts or stops stabilizing; the service keeps running for the other wishes (see the top). */
     private void setStabilizing(boolean on) {
         if (on == sStabilizing) {
             return;
@@ -197,14 +254,14 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         } else if (!stopIfUnused()) {
             mImu.stop();
             mStreaming = false;
-            mStab.post(this::recenter);  // back to the normal picture
-            setStatus(MOUSE_ONLY);
+            mStab.post(this::recenter);  // back to the unstabilized picture
+            setStatus(idleStatus());
         }
     }
 
-    /** Stops the service when neither stabilizing nor the mouse screen needs it. */
+    /** Stops the service when neither stabilizing, the mouse or picture screen nor the picture's size and position needs it. */
     private boolean stopIfUnused() {
-        if (!sStabilizing && !sMouseOn) {
+        if (!sStabilizing && !sMouseOn && !sPictureOn && !mOptions.adjusted()) {
             stopSelf();
             return true;
         }
@@ -223,6 +280,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         sRunning = false;
         sStabilizing = false;
         sMouseOn = false;
+        sPictureOn = false;
         if (sInstance == this) {
             sInstance = null;
         }
@@ -296,7 +354,8 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
             }
             mConnectedHelper = helper;
             mWorker.execute(() -> {
-                Helper.Attached a = helper.attach(mClientToken, mOptions.display, mOptions.fill);
+                Options o = mOptions;
+                Helper.Attached a = helper.attach(mClientToken, o.display, o.fill, o.offsetX, o.offsetY);
                 mMain.post(() -> onAttached(helper, a));
             });
         }
@@ -322,11 +381,13 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         mDisplayId = a.displayId;
         mDisplayName = a.name;
         Log.i(TAG, "attached to display " + a.displayId + " (" + a.name + ")");
+        Options o = mOptions;  // in case they changed while attaching
+        helper.layout(o.fill, o.offsetX, o.offsetY);
         if (sStabilizing) {
             setStatus("Waiting for the glasses' motion sensor…");
             mImu.start();
         } else {
-            setStatus(MOUSE_ONLY);
+            setStatus(idleStatus());
         }
     }
 
@@ -433,6 +494,17 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         scheduleFrame();
     }
 
+    /** Stab thread, every RESEND_MS: frames stop without samples, but the picture's size and position still get resent. */
+    private final Runnable mResend = new Runnable() {
+        @Override
+        public void run() {
+            if (!mStreaming && mOptions.adjusted()) {
+                scheduleFrame();
+            }
+            mStab.postDelayed(this, RESEND_MS);
+        }
+    };
+
     private void scheduleFrame() {
         if (!mFrameScheduled && mChoreographer != null) {
             mFrameScheduled = true;
@@ -490,7 +562,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
                 PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder b = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_menu_view)
-                .setContentTitle(sStabilizing ? "XR Desk" : "XR Desk (mouse)")
+                .setContentTitle(sStabilizing || !sMouseOn ? "XR Desk" : "XR Desk (mouse)")
                 .setContentText(text)
                 .setContentIntent(open)
                 .setOngoing(true);

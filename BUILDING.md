@@ -98,6 +98,11 @@ phone's rotation sensor ──> MouseActivity ──moves, clicks, scroll──>
   (`SurfaceControl.Transaction.setDisplayProjection`). Every window, the taskbar and the cursor
   move together, and nothing is redrawn. It reads the display manager's own projection from
   `dumpsys display` and puts it back when the app stops, or dies (`linkToDeath`).
+- The picture size and position settings (`fill`, `offsetx`, `offsety`) scale that display rect
+  about its center and place it (partly off the panel is fine; SurfaceFlinger crops it), under the stabilizer's offset. They hold while not stabilizing
+  too, so `StabilizerService` keeps the helper attached (without the IMU) while they're set.
+  The projection can only be an axis-aligned rectangle (plus 90° rotations), so this can't
+  rotate or keystone the picture.
 
 ### Mouse and keyboard
 
@@ -138,8 +143,11 @@ All from the shell helper, which isn't subject to hidden API restrictions: `Disp
 
 | Path | What |
 |---|---|
-| `src/com/droid/xrdesk/MainActivity.java` | Main screen: start/stop, settings |
-| `src/com/droid/xrdesk/StabilizerService.java` | Foreground service: IMU in, offsets out; runs for stabilizing or the mouse screen |
+| `src/com/droid/xrdesk/MainActivity.java` | Main screen: start/stop, recenter, the settings rows |
+| `src/com/droid/xrdesk/PictureActivity.java` | Picture size and position screen: drag areas, preview |
+| `src/com/droid/xrdesk/SettingsActivity.java` | Stabilization settings screen |
+| `src/com/droid/xrdesk/Ui.java` | Views and colors the screens share |
+| `src/com/droid/xrdesk/StabilizerService.java` | Foreground service: IMU in, offsets out; runs for stabilizing, the mouse screen or a resized or moved picture |
 | `src/com/droid/xrdesk/ProjectionHelper.java` | Shizuku user service (shell): display projection, keyboard policy, focus |
 | `src/com/droid/xrdesk/Helper.java` | Client side of the helper's Binder protocol |
 | `src/com/droid/xrdesk/MouseActivity.java` | Mouse screen: pointing, buttons, scrolling, typing mode |

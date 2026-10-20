@@ -19,8 +19,11 @@ final class Helper {
         String name;
     }
 
-    /** The helper restores the display if {@code client} dies. displayId -1 = the first external display. */
-    Attached attach(IBinder client, int displayId, float fill) {
+    /**
+     * The helper restores the display if {@code client} dies. displayId -1 = the first external
+     * display. The picture size and position as for {@link #layout}.
+     */
+    Attached attach(IBinder client, int displayId, float fill, float offsetX, float offsetY) {
         Attached result = new Attached();
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
@@ -29,6 +32,8 @@ final class Helper {
             data.writeStrongBinder(client);
             data.writeInt(displayId);
             data.writeFloat(fill);
+            data.writeFloat(offsetX);
+            data.writeFloat(offsetY);
             mBinder.transact(ProjectionHelper.ATTACH, data, reply, 0);
             reply.readException();
             result.error = reply.readString();
@@ -51,6 +56,25 @@ final class Helper {
             data.writeInt(dx);
             data.writeInt(dy);
             mBinder.transact(ProjectionHelper.MOVE, data, null, IBinder.FLAG_ONEWAY);
+        } catch (RemoteException | RuntimeException ignored) {
+            // The helper died; the service notices through its Shizuku connection.
+        } finally {
+            data.recycle();
+        }
+    }
+
+    /**
+     * Sets the picture's size (fill, a fraction of the display) and position (% of the display's
+     * width and height from center, + = right/down); doesn't wait for the helper.
+     */
+    void layout(float fill, float offsetX, float offsetY) {
+        Parcel data = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(ProjectionHelper.DESCRIPTOR);
+            data.writeFloat(fill);
+            data.writeFloat(offsetX);
+            data.writeFloat(offsetY);
+            mBinder.transact(ProjectionHelper.LAYOUT, data, null, IBinder.FLAG_ONEWAY);
         } catch (RemoteException | RuntimeException ignored) {
             // The helper died; the service notices through its Shizuku connection.
         } finally {

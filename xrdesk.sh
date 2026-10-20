@@ -15,10 +15,10 @@
 #
 # options (defaults in parentheses):
 #   focal     pixels the picture slides per radian of head rotation (2262)
-#   drift     seconds to drift back to center (1.0)
+#   drift     seconds to drift back to center (1.0); a large value like 400 anchors the picture
 #   maxyaw    largest sideways slide in px (max);  maxpitch  largest up and down slide in px (max)
-#   max       both of those at once (600). drift, maxyaw and maxpitch are also set in the app,
-#             which shows the max slides as degrees of head rotation.
+#   max       both of those at once (600). drift, maxyaw and maxpitch are also set in the app's
+#             stabilization settings, which show the max slides as degrees of head rotation.
 #   curve     how the picture drifts back (accel): smooth = starts slowly, speeds up, eases into
 #             center; exp = fastest at first, then creeps; linear = constant speed; accel = speeds
 #             up, then stops suddenly. All get halfway back from the larger max offset in
@@ -29,7 +29,11 @@
 #   pointer   both of those at once (focal: the cursor goes where the phone points)
 #   scroll    mouse screen: scroll speed, wheel notches per 0.15 in dragged on the scroll strip (1.0)
 #   scrollinv 1 = drag down to scroll up, like a touch screen (0). Both also set in the app.
-#   fill      picture size as a fraction of the display, 0.5-1 (1.0); below 1 leaves room to slide
+#   fill      picture size as a fraction of the display, 0.5-2 (1.0); below 1 leaves room to
+#             slide, above 1 zooms in
+#   offsetx   picture position, % of the display's width from center, + = right, -50 to 50 (0)
+#   offsety   and % of its height, + = down (0). fill, offsetx and offsety are also set in the
+#             app and hold while not stabilizing.
 #   display   display id to stabilize (first external display)
 #   imuswap   1 = swap horizontal and vertical;  imuinvx / imuinvy  1 = reverse that direction
 set -euo pipefail

@@ -21,7 +21,8 @@ import java.util.regex.Pattern;
 /**
  * Shizuku user service: runs in its own process as the shell user, which SurfaceFlinger lets
  * change a physical display's projection. Stabilization shifts the glasses' whole picture by
- * moving the display rect of that projection; nothing is redrawn. Reached through raw Binder
+ * moving the display rect of that projection, and the picture size and position settings scale
+ * and place it the same way; nothing is redrawn. Reached through raw Binder
  * transactions (this build has no AIDL compiler); see Helper for the client side.
  *
  * It also runs the mouse screen's pointer (MousePointer), since injecting input needs the shell.
@@ -33,7 +34,10 @@ import java.util.regex.Pattern;
 public class ProjectionHelper extends Binder {
     static final String TAG = "XRDesk";
     static final String DESCRIPTOR = "com.droid.xrdesk.ProjectionHelper";
-    /** In: IBinder client, int display id (-1 = first external display), float fill. Out: String error, int display id, String name. */
+    /**
+     * In: IBinder client, int display id (-1 = first external display), float fill, float offset x,
+     * float offset y (as for LAYOUT). Out: String error, int display id, String name.
+     */
     static final int ATTACH = FIRST_CALL_TRANSACTION;
     /** Oneway. In: int dx, int dy (pixels, + = right/down). */
     static final int MOVE = FIRST_CALL_TRANSACTION + 1;
@@ -57,6 +61,8 @@ public class ProjectionHelper extends Binder {
     static final int KEYBOARD_TOP = FIRST_CALL_TRANSACTION + 10;
     /** Oneway. In: int display id that Android's USB permission dialog should move to once it opens. */
     static final int USB_DIALOG_TO = FIRST_CALL_TRANSACTION + 11;
+    /** Oneway. In: float fill (0.5-2), float offset x, float offset y (% of the display's width and height, + = right/down). */
+    static final int LAYOUT = FIRST_CALL_TRANSACTION + 12;
     private static final String USB_DIALOG = ".usb.UsbPermissionActivity";  // in SystemUI
     private static final long USB_DIALOG_WAIT_MS = 3000;
     private static final int IME_POLICY_FALLBACK_DISPLAY = 1;  // WindowManager.DISPLAY_IME_POLICY_FALLBACK_DISPLAY
@@ -73,6 +79,8 @@ public class ProjectionHelper extends Binder {
     private long mPhysicalId;
     private int mOrientation;
     private float mFill = 1f;
+    private float mOffsetX;  // % of the display
+    private float mOffsetY;
     private int mDx;
     private int mDy;
     private boolean mAttached;
@@ -94,7 +102,9 @@ public class ProjectionHelper extends Binder {
                 IBinder client = data.readStrongBinder();
                 int displayId = data.readInt();
                 float fill = data.readFloat();
-                String[] result = attach(client, displayId, fill);
+                float offsetX = data.readFloat();
+                float offsetY = data.readFloat();
+                String[] result = attach(client, displayId, fill, offsetX, offsetY);
                 reply.writeNoException();
                 reply.writeString(result[0]);
                 reply.writeInt(result[1] == null ? -1 : Integer.parseInt(result[1]));
@@ -104,6 +114,10 @@ public class ProjectionHelper extends Binder {
             case MOVE:
                 data.enforceInterface(DESCRIPTOR);
                 move(data.readInt(), data.readInt());
+                return true;
+            case LAYOUT:
+                data.enforceInterface(DESCRIPTOR);
+                layout(data.readFloat(), data.readFloat(), data.readFloat());
                 return true;
             case REFRESH: {
                 data.enforceInterface(DESCRIPTOR);
@@ -168,7 +182,7 @@ public class ProjectionHelper extends Binder {
     }
 
     /** Returns {error or null, display id, display name}. */
-    private synchronized String[] attach(IBinder client, int requestedId, float fill) {
+    private synchronized String[] attach(IBinder client, int requestedId, float fill, float offsetX, float offsetY) {
         try {
             if (mSetProjection == null) {
                 mSetProjection = SurfaceControl.Transaction.class.getMethod("setDisplayProjection",
@@ -209,7 +223,9 @@ public class ProjectionHelper extends Binder {
                 mMouse = new MousePointer(id, base.layerStackId, intField(info, "logicalWidth"),
                         intField(info, "logicalHeight"), intField(info, "logicalDensityDpi"));
                 mDisplayId = id;
-                mFill = Math.max(0.5f, Math.min(1f, fill));
+                mFill = fill;
+                mOffsetX = offsetX;
+                mOffsetY = offsetY;
                 mDx = 0;
                 mDy = 0;
                 mAttached = true;
@@ -221,7 +237,7 @@ public class ProjectionHelper extends Binder {
                 String name = (String) field(info, "name");
                 Log.i(TAG, "helper: attached to display " + id + " (" + name + ", physical " + mPhysicalId
                         + "), base " + mLayerStack.toShortString() + " -> " + mBaseDisplay.toShortString()
-                        + " orientation " + mOrientation + ", fill " + mFill);
+                        + " orientation " + mOrientation + ", fill " + mFill + ", offset " + mOffsetX + "%, " + mOffsetY + "%");
                 return new String[]{null, String.valueOf(id), name};
             }
             return new String[]{requestedId >= 0 ? "no display " + requestedId : "no external display (are the glasses connected?)",
@@ -240,6 +256,16 @@ public class ProjectionHelper extends Binder {
         mDx = dx;
         mDy = dy;
         apply();
+    }
+
+    /** New picture size and position settings. */
+    private synchronized void layout(float fill, float offsetX, float offsetY) {
+        mFill = fill;
+        mOffsetX = offsetX;
+        mOffsetY = offsetY;
+        if (mAttached) {
+            apply();
+        }
     }
 
     /** dumpsys takes a while, so it runs outside the lock and moves continue meanwhile. */
@@ -277,12 +303,12 @@ public class ProjectionHelper extends Binder {
         }
     }
 
-    /** The base display rect, scaled by fill about its center and shifted by the offset. */
+    /** The base display rect, scaled by fill about its center, placed by the layout offset and shifted by the move. */
     private void apply() {
         int w = Math.round(mBaseDisplay.width() * mFill);
         int h = Math.round(mBaseDisplay.height() * mFill);
-        int left = mBaseDisplay.centerX() - w / 2 + mDx;
-        int top = mBaseDisplay.centerY() - h / 2 + mDy;
+        int left = mBaseDisplay.centerX() - w / 2 + Math.round(mBaseDisplay.width() * mOffsetX / 100f) + mDx;
+        int top = mBaseDisplay.centerY() - h / 2 + Math.round(mBaseDisplay.height() * mOffsetY / 100f) + mDy;
         mDisplayRect.set(left, top, left + w, top + h);
         project(mDisplayRect);
     }

@@ -6,64 +6,43 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Insets;
+import android.graphics.drawable.StateListDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.text.InputType;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.WindowInsets;
-import android.view.inputmethod.EditorInfo;
-import android.view.inputmethod.InputMethodManager;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.SeekBar;
 import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
 
 import rikka.shizuku.Shizuku;
 
 /**
- * The app's screen: shows the stabilizer's status and starts, recenters and stops it, with a
- * number box for the drift time, sliders for the largest compensated rotation sideways and up and
- * down, and a drop-down of drift curves (all applied right away). The Mouse button is pinned to
- * the bottom and large, to find with a thumb while wearing the glasses. Stabilizing starts by
- * itself when the app opens (once, so stopping it sticks while the app stays open); starting
- * asks for Shizuku permission the first time. Over adb:
+ * The app's screen: the stabilizer's status, then two rows that open the settings changed now and
+ * then, each summing them up: the picture's size and position (PictureActivity) and
+ * stabilization (SettingsActivity). The frequent actions are at the bottom, within a thumb's reach
+ * while wearing the glasses and always in the same place: Start/Stop Stabilization, Recenter and
+ * the large Mouse button. Stabilizing starts by itself when the app opens (once, so stopping it
+ * sticks while the app stays open); starting asks for Shizuku permission the first time. Over adb:
  *   am start -n com.droid.xrdesk/.MainActivity --ez start true [--es options "key=value ..."]
  */
 public class MainActivity extends Activity {
     private static final int SHIZUKU_REQUEST = 1;
     private static final int NOTIFICATION_REQUEST = 2;
+    private static final float BUTTON_HEIGHT_IN = 0.5f;  // Start/Stop and Recenter
     private static final float MOUSE_BUTTON_HEIGHT_IN = 1f;
-    // Drift curves, indexed by the Stabilizer constant: saved names and labels.
-    private static final String[] CURVE_NAMES = {"smooth", "exp", "linear", "accel"};
-    private static final String[] CURVE_LABELS = {
-            "Smooth: eases in, speeds up, eases into center",
-            "Exponential: fastest at first, then creeps",
-            "Linear: constant speed, stops at center",
-            "Speed up: accelerates, then stops suddenly",
-    };
+    private static final float ROW_HEIGHT_IN = 0.55f;    // the settings rows, at least
 
     private final Handler mMain = new Handler(Looper.getMainLooper());
     private TextView mStatus;
-    private TextView mOptionsText;
+    private TextView mPictureSummary;
+    private TextView mStabilizationSummary;
     private Button mStartStop;
     private Button mRecenter;
-    private TextView mDriftLabel;
-    private EditText mDriftInput;
-    private TextView mYawLabel;
-    private SeekBar mYaw;
-    private TextView mPitchLabel;
-    private SeekBar mPitch;
-    private Spinner mCurve;
     private boolean mStartWhenReady;
     private boolean mStartOnOpen;       // start stabilizing once the notification permission is settled
 
@@ -96,7 +75,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // The settings scroll; the Mouse button stays at the bottom below them.
+        // The status and settings rows scroll if they must; the actions stay at the bottom.
         LinearLayout screen = new LinearLayout(this);
         screen.setOrientation(LinearLayout.VERTICAL);
         screen.setBackgroundColor(Color.BLACK);
@@ -110,112 +89,36 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(48, 48, 48, 32);
         root.setBackgroundColor(Color.BLACK);
-        TextView title = text("XR Desk", 28);
-        mStatus = text("", 18);
-        mStatus.setPadding(0, 24, 0, 24);
-        mStartStop = button("Start Stabilization", v -> {
+        root.addView(Ui.text(this, "XR Desk", 28));
+        mStatus = Ui.text(this, "", 18);
+        mStatus.setPadding(0, 24, 0, 48);
+        root.addView(mStatus);
+        mPictureSummary = settingsRow(root, "Picture size and position", PictureActivity.class, 0);
+        mStabilizationSummary = settingsRow(root, "Stabilization settings", SettingsActivity.class, 24);
+        ScrollView scroll = new ScrollView(this);  // fits short screens, e.g. the glasses
+        scroll.setBackgroundColor(Color.BLACK);
+        scroll.addView(root);
+        screen.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        mStartStop = button("Start Stabilization", 18, v -> {
             if (StabilizerService.stabilizing()) {
                 send(StabilizerService.ACTION_STOP);
             } else {
                 start();
             }
         });
-        mRecenter = button("Recenter", v -> send(StabilizerService.ACTION_RECENTER));
-        Button mouse = button("Mouse", v -> {
+        mRecenter = button("Recenter", 18, v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
+            send(StabilizerService.ACTION_RECENTER);
+        });
+        Button mouse = button("Mouse", 24, v -> {
             v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             startActivity(new Intent(this, MouseActivity.class));
         });
-        mouse.setTextSize(24);
-        mDriftLabel = text("Drift back to center, in seconds (higher = slower)", 16);
-        mDriftLabel.setPadding(0, 48, 0, 8);
-        mDriftInput = new EditText(this);
-        mDriftInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        mDriftInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        mDriftInput.setSingleLine(true);
-        mDriftInput.setTextSize(18);
-        mDriftInput.setTextColor(Color.WHITE);
-        // Applied when editing ends (Done, or tapping elsewhere), never half-typed.
-        mDriftInput.setOnFocusChangeListener((v, hasFocus) -> {
-            if (!hasFocus) {
-                applyDrift();
-            }
-        });
-        mDriftInput.setOnEditorActionListener((v, actionId, event) -> {
-            // Done on the on-screen keyboard, or Enter on a physical one.
-            boolean enter = event != null && event.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER;
-            if (actionId != EditorInfo.IME_ACTION_DONE && !enter) {
-                return false;
-            }
-            getSystemService(InputMethodManager.class).hideSoftInputFromWindow(v.getWindowToken(), 0);
-            root.requestFocus();  // takes focus off the box, which applies it
-            return true;
-        });
-        // Lets the box give up focus, and keeps the keyboard from opening when the screen does.
-        root.setFocusableInTouchMode(true);
-        mYawLabel = text("", 16);
-        mYawLabel.setPadding(0, 32, 0, 8);
-        mYaw = slider(2, 30, yaw -> {
-            saveMax("maxyaw", yaw);
-            showMax(yaw, degrees(Options.load(this).maxPitch));
-        });
-        mPitchLabel = text("", 16);
-        mPitchLabel.setPadding(0, 32, 0, 8);
-        mPitch = slider(2, 30, pitch -> {
-            saveMax("maxpitch", pitch);
-            showMax(degrees(Options.load(this).maxYaw), pitch);
-        });
-        TextView curveLabel = text("Drift back curve", 16);
-        curveLabel.setPadding(0, 32, 0, 8);
-        mCurve = new Spinner(this, Spinner.MODE_DROPDOWN);  // the list is as wide as its longest line
-        mCurve.setAdapter(new ArrayAdapter<String>(this, 0, CURVE_LABELS) {
-            @Override
-            public View getView(int position, View convertView, ViewGroup parent) {
-                return curveRow(position, convertView, 0);
-            }
-
-            @Override
-            public View getDropDownView(int position, View convertView, ViewGroup parent) {
-                return curveRow(position, convertView, 40);
-            }
-        });
-        mCurve.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                // Also called after loadSliders shows the saved curve: only a change is saved.
-                if (position != Options.load(MainActivity.this).curve) {
-                    Options.put(MainActivity.this, "curve", CURVE_NAMES[position]);
-                    send(StabilizerService.ACTION_RELOAD);
-                }
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-            }
-        });
-        mOptionsText = text("", 14);
-        mOptionsText.setTextColor(Color.GRAY);
-        mOptionsText.setPadding(0, 32, 0, 0);
-        root.addView(title);
-        root.addView(mStatus);
-        root.addView(mStartStop);
-        root.addView(mRecenter);
-        root.addView(mDriftLabel);
-        root.addView(mDriftInput);
-        root.addView(mYawLabel);
-        root.addView(mYaw);
-        root.addView(mPitchLabel);
-        root.addView(mPitch);
-        root.addView(curveLabel);
-        root.addView(mCurve);
-        root.addView(mOptionsText);
-        ScrollView scroll = new ScrollView(this);  // fits short screens, e.g. the glasses
-        scroll.setBackgroundColor(Color.BLACK);
-        scroll.addView(root);
-        screen.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-        LinearLayout.LayoutParams mouseParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, Math.round(inches(MOUSE_BUTTON_HEIGHT_IN)));
-        mouseParams.setMargins(48, 0, 48, 48);
-        screen.addView(mouse, mouseParams);
+        // Recenter is next to Mouse, as hitting it by mistake does no harm; Stop is one further.
+        screen.addView(mStartStop, actionParams(BUTTON_HEIGHT_IN, 24));
+        screen.addView(mRecenter, actionParams(BUTTON_HEIGHT_IN, 24));
+        screen.addView(mouse, actionParams(MOUSE_BUTTON_HEIGHT_IN, 48));
         setContentView(screen);
 
         Shizuku.addRequestPermissionResultListener(mPermissionListener, mMain);
@@ -254,7 +157,7 @@ public class MainActivity extends Activity {
         setIntent(intent);
         handleIntent(intent);
         startOnOpen();
-        loadSliders();
+        showSummaries();
     }
 
     /** Extras from adb: "options" saves settings (applied right away), "start" starts, "mouse" opens the mouse screen. */
@@ -262,7 +165,8 @@ public class MainActivity extends Activity {
         String options = intent.getStringExtra("options");
         if (options != null) {
             Options.save(this, options);
-            send(StabilizerService.ACTION_RELOAD);
+            StabilizerService.reloadPicture(this);
+            mMain.postDelayed(this::refresh, 100);
         }
         if (intent.getBooleanExtra("start", false)) {
             mStartOnOpen = true;
@@ -275,69 +179,15 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        loadSliders();
+        showSummaries();
         mMain.post(mRefresh);
     }
 
-    /** Shows the saved settings on the sliders (they may have been changed over adb). */
-    private void loadSliders() {
+    /** The settings rows' summaries (changed on their screens, or over adb). */
+    private void showSummaries() {
         Options o = Options.load(this);
-        int yaw = degrees(o.maxYaw);
-        int pitch = degrees(o.maxPitch);
-        mDriftInput.setText(seconds(o.drift));
-        mDriftInput.setError(null);
-        mYaw.setProgress(yaw);
-        mPitch.setProgress(pitch);
-        showMax(yaw, pitch);
-        mCurve.setSelection(o.curve);
-    }
-
-    /** A max rotation option (picture offset in px) as degrees of head rotation. */
-    private int degrees(float maxPx) {
-        return (int) Math.round(Math.toDegrees(maxPx / Options.load(this).focal));
-    }
-
-    /** Saves a max rotation slider's value as the picture offset in px. */
-    private void saveMax(String key, int degrees) {
-        Options.put(this, key, String.valueOf(Math.round(Math.toRadians(degrees) * Options.load(this).focal)));
-        send(StabilizerService.ACTION_RELOAD);
-    }
-
-    /** Saves the typed drift time if it's a valid number of seconds. */
-    private void applyDrift() {
-        float value;
-        try {
-            value = Float.parseFloat(mDriftInput.getText().toString().trim());
-        } catch (NumberFormatException e) {
-            value = Float.NaN;
-        }
-        if (!(value > 0f) || Float.isInfinite(value)) {
-            mDriftInput.setError("Enter a number of seconds above 0");
-            return;
-        }
-        mDriftInput.setError(null);
-        if (value != Options.load(this).drift) {
-            Options.put(this, "drift", seconds(value));
-            send(StabilizerService.ACTION_RELOAD);
-        }
-    }
-
-    /** 3 rather than 3.0. */
-    private static String seconds(float value) {
-        return value == Math.rint(value) && value < 1e9f ? String.valueOf((long) value) : String.valueOf(value);
-    }
-
-    private void showMax(int yaw, int pitch) {
-        mYawLabel.setText("Max side-to-side rotation (yaw): " + yaw + "°");
-        mPitchLabel.setText("Max up-and-down rotation (pitch): " + pitch + "°");
-    }
-
-    /** A drift curve in the drop-down: closed (no padding) or in the open list. */
-    private TextView curveRow(int position, View convertView, int padding) {
-        TextView t = convertView instanceof TextView ? (TextView) convertView : text("", 16);
-        t.setText(CURVE_LABELS[position]);
-        t.setPadding(padding, padding, padding, padding);
-        return t;
+        mPictureSummary.setText(PictureActivity.describe(o));
+        mStabilizationSummary.setText(SettingsActivity.describe(o));
     }
 
     @Override
@@ -397,49 +247,53 @@ public class MainActivity extends Activity {
         }
         mStartStop.setText(running ? "Stop Stabilization" : "Start Stabilization");
         mRecenter.setEnabled(running);
-        String options = Options.load(this).text;
-        mOptionsText.setText(options.isEmpty() ? "Options: defaults" : "Options: " + options);
     }
 
-    private TextView text(String s, int sp) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(sp);
-        t.setTextColor(Color.WHITE);
-        return t;
+    /**
+     * A row that opens a settings screen: its title, a summary of its settings below (returned,
+     * to fill in) and a › at the end.
+     */
+    private TextView settingsRow(LinearLayout parent, String title, Class<? extends Activity> screen, int topMargin) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(Math.round(Ui.inches(this, ROW_HEIGHT_IN)));
+        row.setPadding(40, 28, 32, 28);
+        StateListDrawable bg = new StateListDrawable();
+        bg.addState(new int[]{android.R.attr.state_pressed}, Ui.rounded(Ui.PRESSED_COLOR));
+        bg.addState(new int[0], Ui.rounded(Ui.BUTTON_COLOR));
+        row.setBackground(bg);
+        row.setOnClickListener(v -> startActivity(new Intent(this, screen)));
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.addView(Ui.text(this, title, 18));
+        TextView summary = Ui.text(this, "", 14);
+        summary.setTextColor(Ui.SECONDARY_TEXT);
+        summary.setPadding(0, 4, 0, 0);
+        texts.addView(summary);
+        row.addView(texts, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView arrow = Ui.text(this, "›", 28);
+        arrow.setTextColor(Ui.SECONDARY_TEXT);
+        arrow.setPadding(24, 0, 0, 0);
+        row.addView(arrow);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        p.topMargin = topMargin;
+        parent.addView(row, p);
+        return summary;
     }
 
-    /** A slider from min to max; onChange gets the value when the user moves it. */
-    private SeekBar slider(int min, int max, java.util.function.IntConsumer onChange) {
-        SeekBar s = new SeekBar(this);
-        s.setMin(min);
-        s.setMax(max);
-        s.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser) {
-                    onChange.accept(progress);
-                }
-            }
-
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {
-            }
-
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {
-            }
-        });
-        return s;
+    /** A bottom action's size: full width, a fixed height, and its gap below. */
+    private LinearLayout.LayoutParams actionParams(float heightIn, int bottomMargin) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Math.round(Ui.inches(this, heightIn)));
+        p.setMargins(48, 0, 48, bottomMargin);
+        return p;
     }
 
-    private float inches(float in) {
-        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_IN, in, getResources().getDisplayMetrics());
-    }
-
-    private Button button(String label, View.OnClickListener listener) {
+    private Button button(String label, int sp, View.OnClickListener listener) {
         Button b = new Button(this);
         b.setText(label);
+        b.setTextSize(sp);
         b.setGravity(Gravity.CENTER);
         b.setOnClickListener(listener);
         return b;

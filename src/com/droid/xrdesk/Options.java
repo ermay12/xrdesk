@@ -12,13 +12,16 @@ import java.util.Map;
 /**
  * Settings, saved as one "key=value key=value" string (see xrdesk.sh for the list):
  *   adb shell am start -n com.droid.xrdesk/.MainActivity --es options "drift=0.3 max=400"
- * The app's sliders, curve choice and switch change drift, maxyaw, maxpitch, curve, pointerx,
- * pointery, scroll and scrollinv in the same string.
+ * The app's settings screens change drift, maxyaw, maxpitch, curve, fill, offsetx, offsety,
+ * pointerx, pointery, scroll and scrollinv in the same string.
  */
 final class Options {
     private static final String TAG = "XRDesk";
     private static final String PREFS = "xrdesk";
     private static final String KEY = "options";
+    static final int MIN_FILL = 50;    // picture size, % of the display
+    static final int MAX_FILL = 200;   // where MAX_OFFSET pans exactly to the picture's edges
+    static final int MAX_OFFSET = 50;  // picture position, % of the display: its center at the edge
 
     final float focal;      // on-screen pixels per radian of head rotation
     final float pointerX;   // mouse screen: cursor pixels per radian the phone turns sideways
@@ -31,7 +34,9 @@ final class Options {
     final float maxPitch;   // and up and down (tilting it)
     final float predictMs;  // look-ahead covering display latency
     final float deadband;   // rad/s of rotation ignored as noise
-    final float fill;       // picture size as a fraction of the display (0.5-1); < 1 leaves room to move
+    final float fill;       // picture size as a fraction of the display (0.5-2); < 1 leaves room to move, > 1 zooms in
+    final float offsetX;    // picture position, % of the display's width from center (+ = right)
+    final float offsetY;    // and % of its height (+ = down); both up to MAX_OFFSET either way
     final int display;      // display id to stabilize; -1 = the first external display
     final boolean swapAxes; // fix-ups for the IMU mounting
     final boolean invertX;
@@ -54,11 +59,18 @@ final class Options {
         maxPitch = f(m, "maxpitch", max);
         predictMs = f(m, "predict", 8f);
         deadband = f(m, "deadband", 0.004f);
-        fill = f(m, "fill", 1f);
+        fill = Math.max(MIN_FILL / 100f, Math.min(MAX_FILL / 100f, f(m, "fill", 1f)));
+        offsetX = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, f(m, "offsetx", 0f)));
+        offsetY = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, f(m, "offsety", 0f)));
         display = (int) f(m, "display", -1);
         swapAxes = f(m, "imuswap", 0) != 0;
         invertX = f(m, "imuinvx", 0) != 0;
         invertY = f(m, "imuinvy", 0) != 0;
+    }
+
+    /** The picture isn't the display's size or is off center, which holds even while not stabilizing. */
+    boolean adjusted() {
+        return fill != 1f || offsetX != 0f || offsetY != 0f;
     }
 
     static Options load(Context context) {

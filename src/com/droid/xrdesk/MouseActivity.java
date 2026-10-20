@@ -18,11 +18,8 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
-import android.os.VibrationAttributes;
 import android.os.VibrationEffect;
-import android.os.Vibrator;
 import android.util.Log;
-import android.util.TypedValue;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
@@ -30,7 +27,6 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -82,8 +78,6 @@ public class MouseActivity extends Activity implements SensorEventListener {
     private static final long KEYBOARD_WATCH_MS = 300;    // otherwise, for one to open or close
     private static final String SIDEWAYS = "side to side";
     private static final String UP_AND_DOWN = "up and down";
-    private static final int BUTTON_COLOR = 0xFF2A2A2A;
-    private static final int PRESSED_COLOR = 0xFF5A5A5A;
 
     private static final String TAG = "XRDesk";
 
@@ -125,7 +119,6 @@ public class MouseActivity extends Activity implements SensorEventListener {
     private int mKeyboardGoneChecks;
 
     private float mScrollNotchPx;       // main thread
-    private Vibrator mVibrator;
     private LinearLayout mRoot;
     private Insets mBars = Insets.NONE;
     private View mSettings;             // the speed sliders and scroll switch
@@ -165,8 +158,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         mSensors = getSystemService(SensorManager.class);
         mRotation = mSensors.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
-        mScrollNotchPx = inches(SCROLL_NOTCH_IN);
-        mVibrator = getSystemService(Vibrator.class);
+        mScrollNotchPx = Ui.inches(this, SCROLL_NOTCH_IN);
         mPointerThread = new HandlerThread("xrdesk-pointer", Process.THREAD_PRIORITY_DISPLAY);
         mPointerThread.start();
         mPointer = new Handler(mPointerThread.getLooper());
@@ -183,14 +175,14 @@ public class MouseActivity extends Activity implements SensorEventListener {
 
         // Top: Back, Center cursor, Center screen; the status below them.
         LinearLayout bar = new LinearLayout(this);
-        bar.addView(menuButton("Back", v -> finish()), weightedWidth());
-        bar.addView(menuButton("Center cursor", this::recenter), weightedWidth());
-        bar.addView(menuButton("Center screen", v -> {
+        bar.addView(Ui.menuButton(this, "Back", v -> finish()), Ui.weightedWidth());
+        bar.addView(Ui.menuButton(this, "Center cursor", this::recenter), Ui.weightedWidth());
+        bar.addView(Ui.menuButton(this, "Center screen", v -> {
             v.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
             if (StabilizerService.running()) {
                 startService(new Intent(this, StabilizerService.class).setAction(StabilizerService.ACTION_RECENTER));
             }
-        }), weightedWidth());
+        }), Ui.weightedWidth());
         root.addView(bar);
         mStatus = new TextView(this);
         mStatus.setTextColor(Color.LTGRAY);
@@ -233,7 +225,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
         clicks.addView(clickButton("Left click", MotionEvent.BUTTON_PRIMARY), weightedHeight(0, 8, 0, 0));
         block.addView(clicks, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
         LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
-                Math.round(inches(SCROLL_WIDTH_IN)), LinearLayout.LayoutParams.MATCH_PARENT);
+                Math.round(Ui.inches(this, SCROLL_WIDTH_IN)), LinearLayout.LayoutParams.MATCH_PARENT);
         scrollParams.leftMargin = 16;
         block.addView(scrollStrip(), scrollParams);
         root.addView(block, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, blockHeight()));
@@ -313,8 +305,9 @@ public class MouseActivity extends Activity implements SensorEventListener {
         mPointer.post(() -> {
             mWidth = size.x;
             mHeight = size.y;
-            mPxPerRadX = options.pointerX;
-            mPxPerRadY = options.pointerY;
+            // The speeds are for a full-size picture; a smaller one needs more of its pixels per radian.
+            mPxPerRadX = options.pointerX / options.fill;
+            mPxPerRadY = options.pointerY / options.fill;
             mCentered = false;
             mSentX = mSentY = Float.NaN;
             mButtonsDown = 0;
@@ -396,21 +389,9 @@ public class MouseActivity extends Activity implements SensorEventListener {
         mRoot.setPadding(24 + mBars.left, 16 + mBars.top, 24 + mBars.right, 24 + bottom);
     }
 
-    /**
-     * A short, gentle click, so you can feel the keyboard open without looking at the phone. As
-     * hardware feedback (the phone is the glasses' mouse and keyboard), so it still plays when
-     * touch feedback is turned off in the phone's settings or the phone is on silent.
-     */
+    /** A short, gentle click, so you can feel the keyboard open without looking at the phone. */
     private void buzzKeyboardOpened() {
-        if (mVibrator == null || !mVibrator.hasVibrator()) {
-            return;
-        }
-        VibrationEffect effect = mVibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_CLICK)
-                ? VibrationEffect.startComposition()
-                        .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, KEYBOARD_BUZZ_SCALE)
-                        .compose()
-                : VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK);
-        mVibrator.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_HARDWARE_FEEDBACK));
+        Ui.buzz(this, VibrationEffect.Composition.PRIMITIVE_CLICK, KEYBOARD_BUZZ_SCALE, VibrationEffect.EFFECT_TICK);
     }
 
     private void disconnect() {
@@ -569,13 +550,13 @@ public class MouseActivity extends Activity implements SensorEventListener {
     // ---- Buttons and scrolling ----
 
     private View clickButton(String label, int button) {
-        GradientDrawable bg = rounded(BUTTON_COLOR);
-        TextView v = label(label);
+        GradientDrawable bg = Ui.rounded(Ui.BUTTON_COLOR);
+        TextView v = Ui.label(this, label);
         v.setBackground(bg);
         v.setOnTouchListener((view, ev) -> {
             int action = ev.getActionMasked();
             if (action == MotionEvent.ACTION_DOWN) {
-                bg.setColor(PRESSED_COLOR);
+                bg.setColor(Ui.PRESSED_COLOR);
                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
                 mPointer.post(() -> {
                     if (mButtonsDown == 0) {
@@ -590,7 +571,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
                     }
                 });
             } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                bg.setColor(BUTTON_COLOR);
+                bg.setColor(Ui.BUTTON_COLOR);
                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY_RELEASE);
                 mPointer.post(() -> {
                     mButtonsDown &= ~button;
@@ -620,13 +601,13 @@ public class MouseActivity extends Activity implements SensorEventListener {
      * like a wheel's detents.
      */
     private View scrollStrip() {
-        GradientDrawable bg = rounded(BUTTON_COLOR);
-        TextView v = label("▲\n\n\nScroll\n\n\n▼");
+        GradientDrawable bg = Ui.rounded(Ui.BUTTON_COLOR);
+        TextView v = Ui.label(this, "▲\n\n\nScroll\n\n\n▼");
         v.setBackground(bg);
         v.setOnTouchListener((view, ev) -> {
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    bg.setColor(PRESSED_COLOR);
+                    bg.setColor(Ui.PRESSED_COLOR);
                     mPointer.post(() -> mScrolling = true);
                     mScrollLastY = ev.getY();
                     mScrollTicks = 0f;
@@ -650,7 +631,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
                 }
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
-                    bg.setColor(BUTTON_COLOR);
+                    bg.setColor(Ui.BUTTON_COLOR);
                     mPointer.post(() -> {
                         mScrolling = false;
                         mHoldUntilMs = SystemClock.uptimeMillis() + RELEASE_HOLD_MS;
@@ -664,36 +645,6 @@ public class MouseActivity extends Activity implements SensorEventListener {
         return v;
     }
 
-    private Button menuButton(String text, View.OnClickListener listener) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setAllCaps(false);
-        b.setOnClickListener(listener);
-        return b;
-    }
-
-    private TextView label(String text) {
-        TextView v = new TextView(this);
-        v.setText(text);
-        v.setTextColor(Color.WHITE);
-        v.setTextSize(20);
-        v.setGravity(Gravity.CENTER);
-        return v;
-    }
-
-    private static GradientDrawable rounded(int color) {
-        GradientDrawable d = new GradientDrawable();
-        d.setColor(color);
-        d.setCornerRadius(36f);
-        return d;
-    }
-
-    private static LinearLayout.LayoutParams weightedWidth() {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        p.setMargins(4, 0, 4, 0);
-        return p;
-    }
-
     private static LinearLayout.LayoutParams weightedHeight(int left, int top, int right, int bottom) {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
         p.setMargins(left, top, right, bottom);
@@ -702,11 +653,11 @@ public class MouseActivity extends Activity implements SensorEventListener {
 
     /** The click buttons and the scroll strip, when no keyboard is showing. */
     private int blockHeight() {
-        return Math.round(inches(CONTROLS_HEIGHT_IN));
+        return Math.round(Ui.inches(this, CONTROLS_HEIGHT_IN));
     }
 
     private TextView speedLabel() {
-        TextView v = label("");
+        TextView v = Ui.label(this, "");
         v.setTextSize(16);
         v.setPadding(0, 32, 0, 8);
         return v;
@@ -730,7 +681,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
                 Context context = MouseActivity.this;
                 Options.put(context, key, String.valueOf(Math.round(tenths / 10f * Options.load(context).focal)));
                 Options options = Options.load(context);
-                mPointer.post(() -> setSpeed(options.pointerX, options.pointerY));
+                mPointer.post(() -> setSpeed(options.pointerX / options.fill, options.pointerY / options.fill));
             }
 
             @Override
@@ -809,9 +760,5 @@ public class MouseActivity extends Activity implements SensorEventListener {
         }
         mPxPerRadX = pxPerRadX;
         mPxPerRadY = pxPerRadY;
-    }
-
-    private float inches(float in) {
-        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_IN, in, getResources().getDisplayMetrics());
     }
 }
