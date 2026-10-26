@@ -34,6 +34,8 @@ Connect the phone with adb (USB, or **Developer options → Wireless debugging**
 ./xrdesk.sh start                 # start stabilizing (as opening the app does)
 ./xrdesk.sh stop | recenter
 ./xrdesk.sh mouse                 # open the mouse screen
+./xrdesk.sh 3d on | off           # switch the glasses to 3D (side by side) or back to 2D
+./xrdesk.sh mcu 07                # development: send the glasses' MCU a command; the reply is logged
 ./xrdesk.sh options drift=3 maxyaw=800   # save settings, applied right away; none = defaults
 ./xrdesk.sh log                   # follow the log (tag XRDesk)
 ```
@@ -76,7 +78,8 @@ To build a release APK locally:
 
 ```
 glasses' IMU (USB HID) ──> StabilizerService ──offset per frame──> ProjectionHelper (shell, via Shizuku)
-                            motion/Stabilizer                        moves the glasses' display projection
+glasses' MCU (USB HID) <─> (2D/3D, buttons)                         moves the glasses' display projection
+                            motion/Stabilizer
 phone's rotation sensor ──> MouseActivity ──moves, clicks, scroll──> MousePointer (in ProjectionHelper)
                                                                       injects mouse events, draws the cursor
 ```
@@ -103,6 +106,31 @@ phone's rotation sensor ──> MouseActivity ──moves, clicks, scroll──>
   too, so `StabilizerService` keeps the helper attached (without the IMU) while they're set.
   The projection can only be an axis-aligned rectangle (plus 90° rotations), so this can't
   rotate or keystone the picture.
+
+### 3D and the glasses' buttons
+
+- The glasses' MCU (USB HID interface 0) sets their display mode: `0x08` with the mode as a
+  little-endian u32, `0x12` for 2D and `0x13` for half-width side by side, read back with `0x07`.
+  These are the a01+'s values, measured; the Air's (in the Linux driver) differ, and a 1-byte
+  mode is refused. Details in `xreal/XrealProtocol.java` and [NOTES-xreal.md](NOTES-xreal.md).
+- A switch makes the glasses reconnect their DisplayPort side: Android removes their display and
+  adds it again, under a new id, after 1 to 3 s. Windows stay; the USB side (the IMU stream)
+  isn't interrupted. `StabilizerService` waits up to 10 s for the display and attaches the
+  helper to it again; the mouse screen reconnects to it by itself.
+- In 3D each eye sees half the picture stretched to the full width, so a sideways shift or a
+  resize would put parts of it in the wrong eye: the helper gets a full-size, centered layout,
+  and only the stabilizer's vertical offset is applied. The mouse screen centers the cursor in
+  the left half and halves the sideways speed; the helper squeezes the arrow to half width, so
+  it looks right once stretched. Android applies the glasses' display size setting
+  a moment after their display comes back, so the helper reads the density again on a display
+  change.
+- The IMU stream needs the SDK-version handshake (`0x31`), and after it the glasses send their
+  button presses to the host instead of acting on them, until they're unplugged. So
+  `XrealImuSource` keeps one connection, with the handshake, from when the service starts until
+  the glasses are unplugged; the service runs that long and handles the buttons (menu: toggle
+  3D; volume: media volume), stabilizing or not. The IMU streams only while stabilizing. Button
+  presses in the first half second of a connection are dropped: the glasses keep one made while
+  nobody was reading and send it once someone does.
 
 ### Mouse and keyboard
 
@@ -147,12 +175,12 @@ All from the shell helper, which isn't subject to hidden API restrictions: `Disp
 | `src/com/droid/xrdesk/PictureActivity.java` | Picture size and position screen: drag areas, preview |
 | `src/com/droid/xrdesk/SettingsActivity.java` | Stabilization settings screen |
 | `src/com/droid/xrdesk/Ui.java` | Views and colors the screens share |
-| `src/com/droid/xrdesk/StabilizerService.java` | Foreground service: IMU in, offsets out; runs for stabilizing, the mouse screen or a resized or moved picture |
+| `src/com/droid/xrdesk/StabilizerService.java` | Foreground service: IMU in, offsets out, 2D/3D, the glasses' buttons; runs from when the app opens until the glasses are unplugged |
 | `src/com/droid/xrdesk/ProjectionHelper.java` | Shizuku user service (shell): display projection, keyboard policy, focus |
 | `src/com/droid/xrdesk/Helper.java` | Client side of the helper's Binder protocol |
 | `src/com/droid/xrdesk/MouseActivity.java` | Mouse screen: pointing, buttons, scrolling, typing mode |
 | `src/com/droid/xrdesk/MousePointer.java` | Mouse event injection and the cursor layer (in the helper) |
-| `src/com/droid/xrdesk/XrealImuSource.java` | XREAL IMU over USB HID |
+| `src/com/droid/xrdesk/XrealImuSource.java` | XREAL IMU over USB HID, MCU commands and button events |
 | `src/com/droid/xrdesk/motion/Stabilizer.java` | Head rotation to picture offset, drift curves |
 | `src/com/droid/xrdesk/xreal/` | XREAL protocol, gyro bias filter, sample ring |
 | `src/com/droid/xrdesk/Options.java` | Settings, one `key=value` string |

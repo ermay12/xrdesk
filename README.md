@@ -37,6 +37,8 @@ Note that the mouse cursor looks normal in the glasses, but doesn't show up in s
   typing straight into it, autocorrect included.
 - **Picture size and position**: shrink the whole desktop inside the glasses' display or zoom
   in on it, and move it where it's easiest to see.
+- **3D videos**: switch the glasses to side-by-side 3D and back from the phone, or with the
+  glasses' menu button.
 
 ## Requirements
 
@@ -57,7 +59,7 @@ Note that the mouse cursor looks normal in the glasses, but doesn't show up in s
 2. **Install XR Desk**: download the latest `xrdesk-<version>.apk` from
    [Releases](https://github.com/ermay12/xrdesk/releases/latest) on the phone and open it. Allow
    installing apps from your browser or file manager when asked.
-3. **Plug in the glasses and open XR Desk.** Stabilization starts by itself. Allow XR Desk to
+3. **Plug in the glasses and open XR Desk.** Allow XR Desk to
    use Shizuku, to show notifications, and to access the glasses. For the glasses, choose **Always allow**, so you
    aren't asked again each time you plug them in.
 
@@ -69,9 +71,9 @@ them through Android's own debugging access, without rooting the phone.
 
 ### Stabilization
 
-- Stabilization starts when you open XR Desk. **Stop Stabilization** / **Start Stabilization**
-  turns it off and on; **Recenter** puts the picture back in the middle. Both are at the bottom
-  of the screen, just above Mouse. The notification has Recenter and Stop Stabilization too.
+- **Start Stabilization** / **Stop Stabilization** turns it on and off; **Recenter** puts the
+  picture back in the middle. Both are at the bottom of the screen, just above Mouse. The
+  notification has them too.
 - Tap **Stabilization settings** to tune it. **Drift back to center** is how long the picture
   takes to come back after you move your head, in seconds; higher is slower. A large number,
   like 400, anchors the picture: it stays put until you recenter. **Max side-to-side
@@ -79,7 +81,16 @@ them through Android's own debugging access, without rooting the phone.
   direction before following you.
 - **Drift back curve**: _Speed up_ (the default) accelerates then stops suddenly, _Smooth_ eases
   in and out, _Exponential_ is fastest at first, and _Linear_ moves at a constant speed.
-- XR Desk stops when you unplug the glasses; tap Start Stabilization after plugging them back in.
+
+### The glasses' buttons
+
+Once you open XR Desk, the glasses send their button presses to it instead of handling them, so
+their own menu doesn't open. The **menu button** switches between 2D and 3D (see
+[3D videos](#3d-videos)); the **volume buttons** change the phone's media volume, and repeat
+while held. This works whether or not you're stabilizing.
+
+XR Desk keeps running, with its notification, until you unplug the glasses; that's when they get
+their buttons back. Open XR Desk again after plugging them back in.
 
 ### Picture size and position
 
@@ -102,8 +113,10 @@ them through Android's own debugging access, without rooting the phone.
 Tap **Mouse**, the big button at the bottom of the screen, easy to find with your thumb while
 wearing the glasses. It works with or without stabilization.
 
-- **Point** with the top edge of the phone. **Center cursor** puts the cursor back in the middle;
-  **Center screen** recenters the stabilized picture.
+- **Point** with the top edge of the phone. **Center cursor** puts the cursor back in the middle.
+  To recenter the stabilized picture, use Recenter on the main screen or in the notification.
+- **Hold for 3D** (top right) switches the glasses to 3D, and **Hold for 2D** back; hold it for
+  half a second. See [3D videos](#3d-videos).
 - After a click, the window you clicked keeps input focus while you use the mouse screen, and
   the phone's volume buttons change the volume as usual.
 - **Right click** and **Left click** are at the bottom left; hold Left click and turn the phone
@@ -122,11 +135,38 @@ buzz so you know without looking; type as usual. The buttons fill the space abov
 and typing ends by itself when the keyboard closes (or press Back). After closing the keyboard,
 click the text box again to bring it back.
 
+### 3D videos
+
+The glasses can show side-by-side (SBS) 3D: the left half of the picture goes to your left eye
+and the right half to your right eye. The whole desktop is split the same way, so it's hard to
+use in 3D; find and start the video in 2D first.
+
+1. Open the video and make it fullscreen, using the mouse screen.
+2. Switch to 3D: tap **Switch to 3D** on the main screen, hold **Hold for 3D** on the mouse
+   screen for half a second, or press the glasses' menu button. The glasses go dark for a few
+   seconds, then the phone buzzes twice.
+3. Pause and seek with the phone's media controls (in the notification shade), or with the
+   mouse screen. The cursor shows in one eye at a time: it starts in your left eye's view, and
+   moved past that view's right edge it carries on in your right eye's view, from its left edge.
+   Leave the mouse screen to hide it.
+4. Switch back to 2D the same ways, or with **Switch to 2D** in XR Desk's notification.
+
+In 3D, stabilization only corrects up-and-down head movement, and the picture is full size and
+centered: moving or resizing it sideways would put parts of the picture in the wrong eye. Your
+picture size and position come back in 2D. The glasses are always in 2D after being plugged in.
+
+Without XR Desk, avoid the 3D item in the glasses' own menu: on phones that can only send
+half-width 3D (like the Pixel 9a), it switches to full-width 3D, and the picture is lost until
+you unplug the glasses.
+
 ## Known limits
 
 - Only XREAL xbx a01 and a01+ glasses are supported.
 - Phone updates may break XR Desk, since it uses parts of Android that aren't public APIs.
 - While the mouse screen is open, the glasses' keyboard appears on the phone.
+- Once XR Desk is open, the glasses' own menu (brightness and so on) isn't available until you
+  unplug them (see [The glasses' buttons](#the-glasses-buttons)).
+- 3D is half-width side by side (each eye sees 960 × 1080 pixels, stretched).
 
 ## Building from source
 

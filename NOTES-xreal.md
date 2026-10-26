@@ -80,3 +80,32 @@ timeout, 0.02 Hz cutoff. XRLinuxDriver applies it to these glasses (device_imu.c
 - Known limitations / unverified: everything on real glasses (permission grant via shell identity, claiming HID interfaces on
   Android 17, MCU bootstrap acks, sample rate, axis mapping for the a01+ mount, bias filter behaviour); cursor not stabilized;
   layer moves paced by the app vsync (Choreographer), which is the same vsync the platform gives all apps on external displays.
+
+## a01+ MCU: display mode and buttons (measured 2026-10-26, Pixel 9a, Android 17, firmware 19.1.01.125_20260624)
+- Replies carry a status byte first (0 = ok). Firmware string from 0x26: "19.1.01.125_20260624".
+- Display mode: get 0x07 replies "00 12 00 00 00" in 2D and "00 13 00 00 00" in half-width SBS 3D, so mode 0x12 = 2D,
+  0x13 = 3D. These are NOT the Air values in mcu_hid.h (1, 3, 8, ...). Set 0x08 needs the mode as a 4-byte LE u32:
+  with 1 byte the reply is "01 12" (refused); with 4 bytes "00", and the glasses switch.
+- A switch reconnects the DisplayPort side: Android removes the glasses' logical display and adds it again 1-3 s later
+  under a new display id (DisplayManagerService "Logical display removed/added"). Windows and tasks stay. The USB side
+  isn't reset: the IMU stream carries on (about 860 Hz before and after).
+- Right after the display comes back its logicalDensityDpi is the EDID's (100 here), and WindowManager applies the
+  display size override (200 here) a moment later, as a display change.
+- The phone only lists 1920x1080 modes (no 3840x1080), so only half-width SBS works. The glasses' own menu switches to
+  full-width SBS, which loses the picture on this phone until the glasses are unplugged.
+- The glasses always start in 2D when plugged in.
+- 0x31 "3.1.1" (SDK version handshake) is required for the IMU stream; without it: no IMU samples within 3 s. It also
+  makes the glasses send all button presses to the host instead of acting on them (their menu, brightness and volume
+  stop working) until they're unplugged. Stopping the host app doesn't restore them; neither does 0x12 or 0x02 with
+  00 00 00 00. Without 0x31 the rest of the bootstrap (0x26, 0x57, 0x12, 0x02, 0x34, 0x35, heartbeats) leaves the
+  buttons alone, and set display mode works.
+- Button events, msgid 0x6C05: data[0] = button (1 menu, 2 volume up, 3 volume down), data[4] = event (16 down,
+  17 up, 1 click after release, 3 long press about 1 s after down).
+- 0x6C02 ("2a 00" / "2b 00") and 0x6C12 ("26 00") arrive about every 20 s; meaning unknown.
+- A button press made while no host reads the MCU interface is kept and sent to the next connection, within its
+  first half second (seen twice: a menu click that switched the glasses to 3D the moment XR Desk connected).
+- After many short MCU connections (open, bootstrap without 0x31, one command, close) within a few minutes, the MCU
+  stopped acking 0x26 for about 20 s, until the glasses' USB side re-enumerated by itself (a detach and attach
+  without the display going away). Cause unknown; XR Desk now keeps one connection instead.
+- Every press reports down (16), up (17) and then click (1); a long press adds 3 about 1 s after down. Volume up
+  and down pressed together arrive as two quick down/up pairs about 15 ms apart.

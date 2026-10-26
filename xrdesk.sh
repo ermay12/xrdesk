@@ -12,6 +12,9 @@
 #   ./xrdesk.sh mouse                 open the mouse screen
 #   ./xrdesk.sh options [key=value...]  save settings, applied right away; none = defaults
 #   ./xrdesk.sh log                  follow the app's log
+#   ./xrdesk.sh 3d on|off            switch the glasses to 3D (side by side) or back to 2D
+#   ./xrdesk.sh mcu <hex bytes>      development: send the glasses' MCU a command, msgid then data
+#                                    (e.g. "07" reads the display mode); the reply is logged
 #
 # options (defaults in parentheses):
 #   focal     pixels the picture slides per radian of head rotation (2262)
@@ -144,5 +147,9 @@ case "${1:-}" in
     recenter) service_action RECENTER ;;
     options) shift; adb shell "am start -n $PKG/.MainActivity --display 0 --es options '$*'" >/dev/null ;;
     log) adb logcat -s XRDesk ;;
+    3d) on=false; [ "${2:-}" = on ] && on=true
+        adb shell am start -n "$PKG/.MainActivity" --display 0 --ez 3d "$on" >/dev/null ;;
+    mcu) shift; adb shell "am start -n $PKG/.MainActivity --display 0 --es mcu '$*'" >/dev/null
+        sleep 1.5; adb logcat -d -s XRDesk | grep -E "MCU|xreal: (button|MCU)" | tail -5 ;;
     *) sed -n '2,/^set -euo/p' "$0" | grep '^#'; exit 1 ;;
 esac

@@ -30,6 +30,10 @@ import java.lang.reflect.Method;
  * itself: a layer on the display's layer stack, which the stabilizer's projection shifts along
  * with the picture.
  *
+ * <p>In half-width side-by-side 3D each eye sees one half of the picture stretched to twice its
+ * width, so the arrow is squeezed to half width to look right there. Only the eye whose half
+ * it's in sees it.
+ *
  * <p>A click moves input focus to the clicked window's display (and brings the window to the
  * front), where the mouse screen then leaves it.
  *
@@ -48,10 +52,10 @@ final class MousePointer {
     private static final long FOCUS_POLL_MS = 5;
 
     private final int mDisplayId;
-    private final int mLayerStack;
+    private int mLayerStack;
     private final int mWidth;
     private final int mHeight;
-    private final int mDensityDpi;
+    private int mDensityDpi;
     private int mHotX;  // the cursor image's hotspot
     private int mHotY;
     private final SurfaceControl.Transaction mTx = new SurfaceControl.Transaction();
@@ -61,8 +65,8 @@ final class MousePointer {
     private Method mSetActionButton;
     private Method mInject;
     private Object mInputManager;
-    private SurfaceControl mCursor;
-    private Surface mCursorSurface;
+    private Arrow mCursor;
+    private boolean mSbs;
     private boolean mShown;
     private boolean mHovering;
     private int mButtons;
@@ -92,7 +96,7 @@ final class MousePointer {
                 ensureCursor();
                 mShown = true;
                 placeCursor();
-                mTx.setVisibility(mCursor, true).apply();
+                setVisible(true);
                 hover(MotionEvent.ACTION_HOVER_ENTER);
             } else {
                 for (int button : new int[]{MotionEvent.BUTTON_PRIMARY, MotionEvent.BUTTON_SECONDARY}) {
@@ -105,11 +109,38 @@ final class MousePointer {
                 }
                 mShown = false;
                 if (mCursor != null) {
-                    mTx.setVisibility(mCursor, false).apply();
+                    setVisible(false);
                 }
             }
         } catch (Throwable e) {
             Log.e(TAG, "mouse: show(" + show + ") failed", e);
+        }
+    }
+
+    /** Whether the glasses are in half-width side-by-side 3D. */
+    synchronized void sbs(boolean sbs) {
+        if (sbs != mSbs) {
+            mSbs = sbs;
+            redraw();
+        }
+    }
+
+    /**
+     * The display's density now. After the glasses' display comes back from a switch between 2D
+     * and 3D, Android applies its display size setting a moment later.
+     */
+    synchronized void density(int dpi) {
+        if (dpi > 0 && dpi != mDensityDpi) {
+            mDensityDpi = dpi;
+            redraw();
+        }
+    }
+
+    /** The layer stack the display shows, which can also be unknown (-1) just after it appears. */
+    synchronized void layerStack(int layerStack) {
+        if (layerStack >= 0 && layerStack != mLayerStack) {
+            mLayerStack = layerStack;
+            redraw();
         }
     }
 
@@ -168,15 +199,7 @@ final class MousePointer {
     /** Removes the cursor (the display is being given back). */
     synchronized void release() {
         show(false);
-        if (mCursor != null) {
-            mTx.reparent(mCursor, null).apply();
-            mCursor.release();
-            mCursor = null;
-        }
-        if (mCursorSurface != null) {
-            mCursorSurface.release();
-            mCursorSurface = null;
-        }
+        dropCursor();
     }
 
     private void hover(int action) {
@@ -272,11 +295,14 @@ final class MousePointer {
 
     private void placeCursor() {
         if (mCursor != null) {
-            mTx.setPosition(mCursor, Math.round(mX) - mHotX, Math.round(mY) - mHotY).apply();
+            mTx.setPosition(mCursor.layer, Math.round(mX) - mHotX, Math.round(mY) - mHotY).apply();
         }
     }
 
-    /** A root layer on the display's layer stack, above everything, showing the arrow. */
+    private void setVisible(boolean visible) {
+        mTx.setVisibility(mCursor.layer, visible).apply();
+    }
+
     private void ensureCursor() throws ReflectiveOperationException {
         if (mCursor != null) {
             return;
@@ -286,26 +312,72 @@ final class MousePointer {
             arrow = drawnArrow();
             mHotX = mHotY = DRAWN_HOTSPOT;
         }
-        mCursor = new SurfaceControl.Builder()
-                .setName("XR Desk pointer")
-                .setBufferSize(arrow.getWidth(), arrow.getHeight())
-                .setFormat(PixelFormat.TRANSLUCENT)
-                .build();
-        mCursorSurface = new Surface(mCursor);
-        Canvas c = mCursorSurface.lockCanvas(null);
-        c.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
-        c.drawBitmap(arrow, 0f, 0f, null);
-        mCursorSurface.unlockCanvasAndPost(c);
-        SurfaceControl.Transaction.class.getMethod("setLayerStack", SurfaceControl.class, int.class)
-                .invoke(mTx, mCursor, mLayerStack);
-        // Android drops touches (and our clicks) on a window that another app's surface covers
-        // (untrusted touch occlusion), and the arrow covers the very pixel being clicked. Trusted
-        // overlays, like the system's own pointer, don't count. Needs ACCESS_SURFACE_FLINGER (shell).
-        SurfaceControl.Transaction.class.getMethod("setTrustedOverlay", SurfaceControl.class, boolean.class)
-                .invoke(mTx, mCursor, true);
-        mTx.setLayer(mCursor, Integer.MAX_VALUE).setVisibility(mCursor, false).apply();
-        Log.i(TAG, "mouse: cursor " + arrow.getWidth() + "x" + arrow.getHeight() + " on layer stack " + mLayerStack
-                + ", display " + mDisplayId + " " + mWidth + "x" + mHeight + " @" + mDensityDpi + "dpi");
+        if (mSbs) {
+            arrow = Bitmap.createScaledBitmap(arrow, Math.max(1, arrow.getWidth() / 2), arrow.getHeight(), true);
+            mHotX /= 2;
+        }
+        mCursor = new Arrow(arrow);
+        Log.i(TAG, "mouse: cursor " + arrow.getWidth() + "x" + arrow.getHeight() + (mSbs ? " (3D)" : "")
+                + " on layer stack " + mLayerStack + ", display " + mDisplayId + " " + mWidth + "x" + mHeight
+                + " @" + mDensityDpi + "dpi");
+    }
+
+    private void dropCursor() {
+        if (mCursor != null) {
+            mCursor.release();
+            mCursor = null;
+        }
+    }
+
+    /** Draws the arrow again after a change, showing it if it was showing. */
+    private void redraw() {
+        if (mCursor == null) {
+            return;  // drawn when first shown
+        }
+        dropCursor();
+        if (!mShown) {
+            return;
+        }
+        try {
+            ensureCursor();
+            placeCursor();
+            setVisible(true);
+        } catch (Throwable e) {
+            Log.e(TAG, "mouse: redrawing the cursor failed", e);
+        }
+    }
+
+    /** A root layer on the display's layer stack, above everything, showing the arrow; hidden at first. */
+    private final class Arrow {
+        final SurfaceControl layer;
+        final Surface surface;
+
+        Arrow(Bitmap arrow) throws ReflectiveOperationException {
+            layer = new SurfaceControl.Builder()
+                    .setName("XR Desk pointer")
+                    .setBufferSize(arrow.getWidth(), arrow.getHeight())
+                    .setFormat(PixelFormat.TRANSLUCENT)
+                    .build();
+            surface = new Surface(layer);
+            Canvas c = surface.lockCanvas(null);
+            c.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+            c.drawBitmap(arrow, 0f, 0f, null);
+            surface.unlockCanvasAndPost(c);
+            SurfaceControl.Transaction.class.getMethod("setLayerStack", SurfaceControl.class, int.class)
+                    .invoke(mTx, layer, mLayerStack);
+            // Android drops touches (and our clicks) on a window that another app's surface covers
+            // (untrusted touch occlusion), and the arrow covers the very pixel being clicked. Trusted
+            // overlays, like the system's own pointer, don't count. Needs ACCESS_SURFACE_FLINGER (shell).
+            SurfaceControl.Transaction.class.getMethod("setTrustedOverlay", SurfaceControl.class, boolean.class)
+                    .invoke(mTx, layer, true);
+            mTx.setLayer(layer, Integer.MAX_VALUE).setVisibility(layer, false).apply();
+        }
+
+        void release() {
+            mTx.reparent(layer, null).apply();
+            layer.release();
+            surface.release();
+        }
     }
 
     /**

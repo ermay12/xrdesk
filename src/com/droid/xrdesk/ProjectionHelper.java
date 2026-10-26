@@ -36,7 +36,7 @@ public class ProjectionHelper extends Binder {
     static final String DESCRIPTOR = "com.droid.xrdesk.ProjectionHelper";
     /**
      * In: IBinder client, int display id (-1 = first external display), float fill, float offset x,
-     * float offset y (as for LAYOUT). Out: String error, int display id, String name.
+     * float offset y, boolean sbs (as for LAYOUT). Out: String error, int display id, String name.
      */
     static final int ATTACH = FIRST_CALL_TRANSACTION;
     /** Oneway. In: int dx, int dy (pixels, + = right/down). */
@@ -61,7 +61,10 @@ public class ProjectionHelper extends Binder {
     static final int KEYBOARD_TOP = FIRST_CALL_TRANSACTION + 10;
     /** Oneway. In: int display id that Android's USB permission dialog should move to once it opens. */
     static final int USB_DIALOG_TO = FIRST_CALL_TRANSACTION + 11;
-    /** Oneway. In: float fill (0.5-2), float offset x, float offset y (% of the display's width and height, + = right/down). */
+    /**
+     * Oneway. In: float fill (0.5-2), float offset x, float offset y (% of the display's width and
+     * height, + = right/down), boolean sbs (the glasses are in side-by-side 3D; see MousePointer).
+     */
     static final int LAYOUT = FIRST_CALL_TRANSACTION + 12;
     private static final String USB_DIALOG = ".usb.UsbPermissionActivity";  // in SystemUI
     private static final long USB_DIALOG_WAIT_MS = 3000;
@@ -104,7 +107,8 @@ public class ProjectionHelper extends Binder {
                 float fill = data.readFloat();
                 float offsetX = data.readFloat();
                 float offsetY = data.readFloat();
-                String[] result = attach(client, displayId, fill, offsetX, offsetY);
+                boolean sbs = data.readBoolean();
+                String[] result = attach(client, displayId, fill, offsetX, offsetY, sbs);
                 reply.writeNoException();
                 reply.writeString(result[0]);
                 reply.writeInt(result[1] == null ? -1 : Integer.parseInt(result[1]));
@@ -117,7 +121,7 @@ public class ProjectionHelper extends Binder {
                 return true;
             case LAYOUT:
                 data.enforceInterface(DESCRIPTOR);
-                layout(data.readFloat(), data.readFloat(), data.readFloat());
+                layout(data.readFloat(), data.readFloat(), data.readFloat(), data.readBoolean());
                 return true;
             case REFRESH: {
                 data.enforceInterface(DESCRIPTOR);
@@ -166,7 +170,11 @@ public class ProjectionHelper extends Binder {
                     return true;
                 }
                 if (code == MOUSE_SHOW) {
-                    mouse.show(data.readBoolean());
+                    boolean show = data.readBoolean();
+                    if (show) {
+                        mouse.density(density(mDisplayId));
+                    }
+                    mouse.show(show);
                 } else if (code == MOUSE_MOVE) {
                     mouse.move(data.readFloat(), data.readFloat());
                 } else if (code == MOUSE_BUTTON) {
@@ -182,7 +190,8 @@ public class ProjectionHelper extends Binder {
     }
 
     /** Returns {error or null, display id, display name}. */
-    private synchronized String[] attach(IBinder client, int requestedId, float fill, float offsetX, float offsetY) {
+    private synchronized String[] attach(IBinder client, int requestedId, float fill, float offsetX, float offsetY,
+            boolean sbs) {
         try {
             if (mSetProjection == null) {
                 mSetProjection = SurfaceControl.Transaction.class.getMethod("setDisplayProjection",
@@ -220,8 +229,11 @@ public class ProjectionHelper extends Binder {
                 if (mMouse != null) {
                     mMouse.release();
                 }
-                mMouse = new MousePointer(id, base.layerStackId, intField(info, "logicalWidth"),
+                // The display's own layer stack until the device's is known (-1 just after it appears).
+                int layerStack = base.layerStackId >= 0 ? base.layerStackId : intField(info, "layerStack");
+                mMouse = new MousePointer(id, layerStack, intField(info, "logicalWidth"),
                         intField(info, "logicalHeight"), intField(info, "logicalDensityDpi"));
+                mMouse.sbs(sbs);
                 mDisplayId = id;
                 mFill = fill;
                 mOffsetX = offsetX;
@@ -259,10 +271,14 @@ public class ProjectionHelper extends Binder {
     }
 
     /** New picture size and position settings. */
-    private synchronized void layout(float fill, float offsetX, float offsetY) {
+    private synchronized void layout(float fill, float offsetX, float offsetY, boolean sbs) {
         mFill = fill;
         mOffsetX = offsetX;
         mOffsetY = offsetY;
+        MousePointer mouse = mMouse;
+        if (mouse != null) {
+            mouse.sbs(sbs);
+        }
         if (mAttached) {
             apply();
         }
@@ -271,11 +287,13 @@ public class ProjectionHelper extends Binder {
     /** dumpsys takes a while, so it runs outside the lock and moves continue meanwhile. */
     private String refresh() {
         long physicalId;
+        int displayId;
         synchronized (this) {
             if (!mAttached) {
                 return "not attached";
             }
             physicalId = mPhysicalId;
+            displayId = mDisplayId;
         }
         try {
             IBinder token = physicalDisplayToken(physicalId);
@@ -291,6 +309,11 @@ public class ProjectionHelper extends Binder {
                 mToken = token;
                 setBase(base);
                 apply();
+            }
+            MousePointer mouse = mMouse;
+            if (mouse != null) {
+                mouse.layerStack(base.layerStackId);
+                mouse.density(density(displayId));
             }
             Log.i(TAG, "helper: base now " + base.layerStack.toShortString() + " -> " + base.display.toShortString()
                     + " orientation " + base.orientation);
@@ -565,6 +588,18 @@ public class ProjectionHelper extends Binder {
             sDisplayControl = dc;
         }
         return (IBinder) sDisplayControl.getMethod("getPhysicalDisplayToken", long.class).invoke(null, physicalId);
+    }
+
+    /** A display's density now, or -1. */
+    private static int density(int displayId) {
+        try {
+            Object global = Class.forName("android.hardware.display.DisplayManagerGlobal")
+                    .getMethod("getInstance").invoke(null);
+            Object info = global.getClass().getMethod("getDisplayInfo", int.class).invoke(global, displayId);
+            return info == null ? -1 : intField(info, "logicalDensityDpi");
+        } catch (Throwable e) {
+            return -1;
+        }
     }
 
     private static Object field(Object o, String name) throws ReflectiveOperationException {

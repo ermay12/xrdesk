@@ -21,6 +21,7 @@ public final class XrealProtocolTest {
     public static void main(String[] args) {
         commandFramesMatchRealUsbTrace();
         commandFramesMatchPythonZlib();
+        parsesMcuPackets();
         crcKnownVector();
         parsesDocumentedLayout();
         parserMatchesIndependentReader();
@@ -94,9 +95,47 @@ public final class XrealProtocolTest {
             threw = true;
         }
         check(threw, "oversized MCU command rejected");
+        byte[] mode = XrealProtocol.displayModeData(XrealProtocol.DISPLAY_MODE_3D);
+        n = XrealProtocol.buildMcuCommand(out, XrealProtocol.MCU_MSG_SET_DISPLAY_MODE, mode, mode.length);
+        check(hex(out, n).equals("fd7649ac7f150000000000000000000800000000000013000000"), "MCU set display mode: " + hex(out, n));
         check(XrealProtocol.isMcuReply(new byte[]{(byte) 0xFD}, 1), "MCU reply head");
         check(!XrealProtocol.isMcuReply(new byte[]{(byte) 0xAA}, 1), "not an MCU reply");
         check(!XrealProtocol.isMcuReply(new byte[]{(byte) 0xFD}, -1), "failed read isn't a reply");
+    }
+
+    /** Packets as the glasses send them: a frame padded to the 64-byte HID report. */
+    static void parsesMcuPackets() {
+        byte[] p = new byte[64];
+        // The a01+'s reply to get-display-mode in 3D, as logged: status 0, mode 0x13 as a u32.
+        XrealProtocol.buildMcuCommand(p, XrealProtocol.MCU_MSG_GET_DISPLAY_MODE, new byte[]{0, 0x13, 0, 0, 0}, 5);
+        check(XrealProtocol.mcuMsgId(p, 64) == 0x07, "reply msgid");
+        byte[] reply = XrealProtocol.mcuData(p, 64);
+        check(hex(reply, reply.length).equals("0013000000"), "reply data ends where its len field says: " + hex(reply, reply.length));
+        check(XrealProtocol.displayModeFromReply(reply) == XrealProtocol.DISPLAY_MODE_3D, "3D mode from the reply");
+        check(XrealProtocol.displayModeFromReply(new byte[]{1, 0x12}) == -1, "failed status gives no mode");
+        check(XrealProtocol.displayModeFromReply(new byte[]{0}) == -1, "short reply gives no mode");
+        check(XrealProtocol.displayModeFromReply(null) == -1, "no reply gives no mode");
+        check(XrealProtocol.mcuButton(p, 64) == null, "a reply isn't a button");
+
+        byte[] data = new byte[12];
+        data[0] = XrealProtocol.BUTTON_VOLUME_UP;
+        data[4] = XrealProtocol.BUTTON_CLICK;
+        data[8] = 5;   // value
+        XrealProtocol.buildMcuCommand(p, XrealProtocol.MCU_MSG_BUTTON, data, data.length);
+        check(XrealProtocol.mcuMsgId(p, 64) == 0x6C05, "button msgid");
+        int[] b = XrealProtocol.mcuButton(p, 64);
+        check(b != null && b[0] == 2 && b[1] == 1 && b[2] == 5, "button fields");
+
+        check(XrealProtocol.mcuMsgId(p, 21) == -1, "short packet");
+        check(XrealProtocol.mcuMsgId(p, -1) == -1, "failed read");
+        byte[] imu = new byte[64];
+        imu[0] = (byte) 0xAA;
+        check(XrealProtocol.mcuMsgId(imu, 64) == -1 && XrealProtocol.mcuData(imu, 64).length == 0
+                && XrealProtocol.mcuButton(imu, 64) == null, "not an MCU packet");
+        p[5] = 0;  // a len field shorter than the header
+        p[6] = 0;
+        check(XrealProtocol.mcuData(p, 64).length == 0, "bad len field gives no data");
+        check(XrealProtocol.hex(new byte[]{0x0a, (byte) 0xff}, 0, 2).equals("0a ff"), "hex");
     }
 
     static void crcKnownVector() {

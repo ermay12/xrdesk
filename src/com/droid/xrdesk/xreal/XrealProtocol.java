@@ -115,6 +115,44 @@ public final class XrealProtocol {
     /** mcu_hid.c:58-59: SDK-version handshake that "enables the IMU stream". */
     public static final int MCU_MSG_SDK_VERSION = 0x31;
     public static final byte[] MCU_SDK_VERSION = {'3', '.', '1', '.', '1'};
+    /**
+     * include/mcu_hid.h DEVICE_MCU_MSG_R_DISP_MODE / W_DISP_MODE: read and set the display mode.
+     * On the a01+ (measured, firmware 19.1.01.125) the mode is a little-endian u32: the read
+     * reply is status, mode (4 bytes), and the set command takes the 4 bytes (with 1 byte, as in
+     * nrealAirLinuxDriver for the Air, it replies status 1 and does nothing). The mode values
+     * differ from the Air's too, see DISPLAY_MODE_*. A switch makes the glasses' DisplayPort
+     * output reconnect: Android removes their display and adds it again about 3 s later.
+     */
+    public static final int MCU_MSG_GET_DISPLAY_MODE = 0x07;
+    public static final int MCU_MSG_SET_DISPLAY_MODE = 0x08;
+    /**
+     * a01+ display modes (measured; not in the Air's DEVICE_MCU_DISPLAY_MODE_* list): 1920x1080
+     * at 60 Hz, and the same signal side by side ("half SBS"), its left half to the left eye and
+     * its right half to the right. The glasses start in 2D whenever they're plugged in.
+     */
+    public static final int DISPLAY_MODE_2D = 0x12;
+    public static final int DISPLAY_MODE_3D = 0x13;
+    /**
+     * include/mcu_hid.h DEVICE_MCU_MSG_P_BUTTON_PRESSED: the glasses report a button (mcu_hid.c
+     * mcu_hid_read_next), but only after the SDK-version handshake (0x31), which also stops them
+     * acting on their buttons themselves until they're unplugged (measured on the a01+).
+     */
+    public static final int MCU_MSG_BUTTON = 0x6C05;
+    /**
+     * Sent by the a01+ every 20 s or so after connecting (include/mcu_hid.h names them
+     * P_START_HEARTBEAT and P_END_HEARTBEAT); their meaning is unknown, and they're ignored.
+     */
+    public static final int MCU_MSG_STATUS_A = 0x6C02;
+    public static final int MCU_MSG_STATUS_B = 0x6C12;
+    /** a01+ buttons (the event's physical button, measured). */
+    public static final int BUTTON_MENU = 1;
+    public static final int BUTTON_VOLUME_UP = 2;
+    public static final int BUTTON_VOLUME_DOWN = 3;
+    /** a01+ button events (the event's "virtual button", measured): a click follows the release, a long press comes about 1 s after the press. */
+    public static final int BUTTON_CLICK = 1;
+    public static final int BUTTON_LONG_PRESS = 3;
+    public static final int BUTTON_DOWN = 16;
+    public static final int BUTTON_UP = 17;
     /** mcu_hid.c:60-62. */
     public static final int MCU_HEARTBEAT_INTERVAL_MS = 100;
     public static final int MCU_RESPONSE_TIMEOUT_MS = 250;
@@ -161,6 +199,63 @@ public final class XrealProtocol {
      */
     public static boolean isMcuReply(byte[] buf, int length) {
         return length > 0 && (buf[0] & 0xFF) == MCU_HEAD;
+    }
+
+    /** The msgid of an MCU packet (head 0xFD), or -1 if {@code buf} isn't one. */
+    public static int mcuMsgId(byte[] buf, int length) {
+        if (length < MCU_DATA_OFFSET || (buf[0] & 0xFF) != MCU_HEAD) {
+            return -1;
+        }
+        return le16s(buf, 15) & 0xFFFF;
+    }
+
+    /**
+     * The data of an MCU packet: from offset 22 to the end its len field gives (or what was
+     * read, if shorter). Replies start with a status byte, 0 = ok, then the value read, e.g.
+     * the display mode (mcu_hid.c recv_payload_msg). Empty if {@code buf} isn't an MCU packet.
+     */
+    public static byte[] mcuData(byte[] buf, int length) {
+        if (mcuMsgId(buf, length) < 0) {
+            return new byte[0];
+        }
+        int end = Math.min(length, 5 + (le16s(buf, 5) & 0xFFFF));
+        return java.util.Arrays.copyOfRange(buf, MCU_DATA_OFFSET, Math.max(MCU_DATA_OFFSET, end));
+    }
+
+    /**
+     * A button event's physical button, virtual button and value (mcu_hid.c mcu_hid_read_next:
+     * data[0], data[4] and data[8]), or null if {@code buf} isn't one.
+     */
+    public static int[] mcuButton(byte[] buf, int length) {
+        if (mcuMsgId(buf, length) != MCU_MSG_BUTTON || length < MCU_DATA_OFFSET + 9) {
+            return null;
+        }
+        return new int[]{buf[MCU_DATA_OFFSET] & 0xFF, buf[MCU_DATA_OFFSET + 4] & 0xFF, buf[MCU_DATA_OFFSET + 8] & 0xFF};
+    }
+
+    /** The set-display-mode command's data: the mode as a little-endian u32. */
+    public static byte[] displayModeData(int mode) {
+        byte[] data = new byte[4];
+        putLe32(data, 0, mode);
+        return data;
+    }
+
+    /** The display mode from a get-display-mode reply's data (status 0, then the mode), or -1. */
+    public static int displayModeFromReply(byte[] data) {
+        if (data == null || data.length < 2 || data[0] != 0) {
+            return -1;
+        }
+        return data.length >= 5 ? le32(data, 1) : data[1] & 0xFF;
+    }
+
+    /** Hex bytes, for logging packets. */
+    public static String hex(byte[] b, int off, int len) {
+        StringBuilder sb = new StringBuilder(len * 3);
+        for (int i = off; i < off + len; i++) {
+            sb.append(i == off ? "" : " ").append(Character.forDigit((b[i] >> 4) & 0xF, 16))
+                    .append(Character.forDigit(b[i] & 0xF, 16));
+        }
+        return sb.toString();
     }
 
     // ---- Axes ----

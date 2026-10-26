@@ -243,7 +243,8 @@ public class PictureActivity extends Activity {
 
     private void showHint() {
         mHint.setText(StabilizerService.helper() == null
-                ? StabilizerService.status()  // starting, or why it can't show on the glasses
+                ? StabilizerService.status()  // starting, switching, or why it can't show on the glasses
+                : StabilizerService.in3d() ? "Paused in 3D. Changes apply back in 2D."
                 : "Drag on Move or Size and watch the glasses.");
     }
 

@@ -27,6 +27,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -35,7 +36,9 @@ import android.widget.TextView;
 
 /**
  * The mouse screen: the phone becomes a mouse for the glasses. Where the phone's top edge points
- * sets the cursor, like a laser pointer; Center cursor recenters it. At the bottom, a block as tall
+ * sets the cursor, like a laser pointer; Center cursor recenters it. The 3D button switches the
+ * glasses to 3D and back, when held for HOLD_3D_MS (the glasses go dark for a few seconds, so not
+ * on a brush of the thumb). At the bottom, a block as tall
  * as the scroll strip holds Right click above Left click, with the scroll strip on the right
  * (drag down to scroll down, unless reversed). Above them are the mouse and scroll settings. The
  * pointer itself runs in the shell helper (MousePointer); this screen starts StabilizerService in
@@ -61,6 +64,10 @@ import android.widget.TextView;
  * between the status and the keyboard, and the mode ends by itself once the keyboard closes.
  * The system Back only closes the keyboard; the Back button at the top leaves this screen.
  *
+ * <p>3D: each eye sees one half of the picture, stretched to the full width, so the cursor
+ * centers in the left half (it shows in one eye only), and sideways it moves half as many pixels
+ * per radian, still going where the phone points.
+ *
  * <p>Click lock: pressing a button jolts the phone, which would turn a click into a small drag.
  * So the cursor freezes while a button is held, until the phone turns past DRAG_START_RAD (a
  * deliberate drag), and for RELEASE_HOLD_MS after release; also while scrolling. The motion
@@ -73,6 +80,8 @@ public class MouseActivity extends Activity implements SensorEventListener {
     private static final float SCROLL_NOTCH_IN = 0.15f;  // finger travel per wheel notch at scroll speed 1x
     private static final float DRAG_START_RAD = (float) Math.toRadians(3);
     private static final long RELEASE_HOLD_MS = 250;
+    private static final long HOLD_3D_MS = 500;
+    private static final long HOLD_HINT_MS = 2000;
     private static final long KEYBOARD_WAIT_MS = 900;     // after a click (whose release may wait 300 ms), for a keyboard
     private static final long KEYBOARD_POLL_MS = 50;      // meanwhile
     private static final long KEYBOARD_WATCH_MS = 300;    // otherwise, for one to open or close
@@ -87,12 +96,16 @@ public class MouseActivity extends Activity implements SensorEventListener {
     private SensorManager mSensors;
     private Sensor mRotation;
     private TextView mStatus;
+    private Button m3d;
+    private boolean mHolding3d;         // main thread: the 3D button is down, not yet held long enough
+    private long mHintUntilMs;          // main thread: a hint shows in the status line until then
     private volatile Helper mHelper;    // null until the helper is attached to the glasses
 
     // Pointer thread from here down (set up on main before the sensor is registered)
     private final float[] mMatrix = new float[9];
     private int mWidth;                 // the glasses' display, px
     private int mHeight;
+    private float mCenterX;             // where Center cursor puts it
     private float mPxPerRadX;           // cursor speeds: sideways, up and down
     private float mPxPerRadY;
     private boolean mCentered;          // false = the next sample becomes the center
@@ -146,8 +159,9 @@ public class MouseActivity extends Activity implements SensorEventListener {
             if (current != mHelper) {
                 connect();
             } else if (current == null) {
-                mStatus.setText(StabilizerService.status());  // starting, or why it couldn't
+                showStatus();  // starting, switching, or why it couldn't
             }
+            show3d();
             mMain.postDelayed(this, 1000);
         }
     };
@@ -173,16 +187,14 @@ public class MouseActivity extends Activity implements SensorEventListener {
             return insets;
         });
 
-        // Top: Back, Center cursor, Center screen; the status below them.
+        // Top: Back, Center cursor, 3D; the status below them. (Recentering the picture is on the
+        // main screen and in the notification.)
         LinearLayout bar = new LinearLayout(this);
         bar.addView(Ui.menuButton(this, "Back", v -> finish()), Ui.weightedWidth());
         bar.addView(Ui.menuButton(this, "Center cursor", this::recenter), Ui.weightedWidth());
-        bar.addView(Ui.menuButton(this, "Center screen", v -> {
-            v.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
-            if (StabilizerService.running()) {
-                startService(new Intent(this, StabilizerService.class).setAction(StabilizerService.ACTION_RECENTER));
-            }
-        }), Ui.weightedWidth());
+        m3d = Ui.menuButton(this, "Hold for 3D", null);
+        m3d.setOnTouchListener(this::onTouch3d);
+        bar.addView(m3d, Ui.weightedWidth());
         root.addView(bar);
         mStatus = new TextView(this);
         mStatus.setTextColor(Color.LTGRAY);
@@ -246,6 +258,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
         // The service runs while stabilizing or while this screen is open; it attaches the helper.
         startForegroundService(new Intent(this, StabilizerService.class).setAction(StabilizerService.ACTION_MOUSE_ON));
         connect();
+        show3d();
         mMain.postDelayed(mWatch, 1000);
     }
 
@@ -253,6 +266,8 @@ public class MouseActivity extends Activity implements SensorEventListener {
     protected void onPause() {
         super.onPause();
         mMain.removeCallbacks(mWatch);
+        mMain.removeCallbacks(mHeld3d);
+        mHolding3d = false;
         setTyping(false);
         Helper helper = mHelper;
         if (isFinishing() && helper != null) {
@@ -302,12 +317,15 @@ public class MouseActivity extends Activity implements SensorEventListener {
         Point size = new Point();
         display.getRealSize(size);
         Options options = Options.load(this);
+        boolean in3d = StabilizerService.in3d();  // reconnected after each switch
         mPointer.post(() -> {
             mWidth = size.x;
             mHeight = size.y;
-            // The speeds are for a full-size picture; a smaller one needs more of its pixels per radian.
-            mPxPerRadX = options.pointerX / options.fill;
-            mPxPerRadY = options.pointerY / options.fill;
+            mCenterX = in3d ? size.x / 4f : size.x / 2f;
+            // The speeds are for a full-size picture; a smaller one needs more of its pixels per
+            // radian, and in 3D (full size) each eye's half is stretched to twice its width.
+            mPxPerRadX = in3d ? options.pointerX / 2f : options.pointerX / options.fill;
+            mPxPerRadY = in3d ? options.pointerY : options.pointerY / options.fill;
             mCentered = false;
             mSentX = mSentY = Float.NaN;
             mButtonsDown = 0;
@@ -330,14 +348,66 @@ public class MouseActivity extends Activity implements SensorEventListener {
     }
 
     private void showStatus() {
-        if (mTyping) {
+        if (SystemClock.uptimeMillis() < mHintUntilMs) {
+            return;
+        }
+        if (StabilizerService.switching()) {
+            mStatus.setText(StabilizerService.status() + " " + StabilizerService.SWITCH_NOTE);
+        } else if (StabilizerService.helper() == null) {
+            mStatus.setText(StabilizerService.running() ? StabilizerService.status() : "Starting…");
+        } else if (mTyping) {
             mStatus.setText("Typing on the glasses. Ends when the keyboard closes.");
+        } else if (StabilizerService.in3d()) {
+            mStatus.setText("3D. Leave this screen to hide the cursor; pause from the phone's media controls.");
         } else {
             mStatus.setText(StabilizerService.stabilizing()
                     ? "Point with the top of the phone. Click a text box to type."
                     : "Mouse only (not stabilizing). Click a text box to type.");
         }
     }
+
+    /** The 3D button's label: what holding it does, or that a switch is under way. */
+    private void show3d() {
+        boolean switching = StabilizerService.switching();
+        m3d.setEnabled(!switching);
+        m3d.setText(switching ? "Switching…" : StabilizerService.in3d() ? "Hold for 2D" : "Hold for 3D");
+    }
+
+    /** The 3D button switches once held for HOLD_3D_MS; let go sooner, and the status line says to hold it. */
+    private boolean onTouch3d(View v, MotionEvent e) {
+        int action = e.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN && v.isEnabled()) {
+            v.setPressed(true);
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            mHolding3d = true;
+            mMain.postDelayed(mHeld3d, HOLD_3D_MS);
+        } else if ((action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) && mHolding3d) {
+            v.setPressed(false);
+            mHolding3d = false;
+            mMain.removeCallbacks(mHeld3d);
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY_RELEASE);
+            mStatus.setText(StabilizerService.in3d() ? "Hold to switch to 2D" : "Hold to switch to 3D");
+            mHintUntilMs = SystemClock.uptimeMillis() + HOLD_HINT_MS;
+            mMain.postDelayed(this::showStatus, HOLD_HINT_MS);
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            v.setPressed(false);
+        }
+        return true;
+    }
+
+    private final Runnable mHeld3d = () -> {
+        mHolding3d = false;
+        m3d.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
+        startForegroundService(new Intent(this, StabilizerService.class).setAction(
+                StabilizerService.in3d() ? StabilizerService.ACTION_3D_OFF : StabilizerService.ACTION_3D_ON));
+        mHintUntilMs = 0;
+        m3d.setEnabled(false);
+        m3d.setText("Switching…");
+        mMain.postDelayed(() -> {
+            show3d();
+            showStatus();
+        }, 300);  // once the service has started switching
+    };
 
     /** Typing mode on/off (main thread); see the class comment. */
     private void setTyping(boolean on) {
@@ -487,7 +557,7 @@ public class MouseActivity extends Activity implements SensorEventListener {
         if (mButtonsDown != 0 && !mDragging && Math.hypot(mA - mPressA, mB - mPressB) > DRAG_START_RAD) {
             mDragging = true;  // a deliberate drag: let the cursor go
         }
-        float x = mWidth / 2f + (mA - mOffA) * mPxPerRadX;
+        float x = mCenterX + (mA - mOffA) * mPxPerRadX;
         float y = mHeight / 2f - (mB - mOffB) * mPxPerRadY;
         float cx;
         float cy;

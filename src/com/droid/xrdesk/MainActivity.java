@@ -10,6 +10,7 @@ import android.graphics.drawable.StateListDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
@@ -25,9 +26,10 @@ import rikka.shizuku.Shizuku;
  * The app's screen: the stabilizer's status, then two rows that open the settings changed now and
  * then, each summing them up: the picture's size and position (PictureActivity) and
  * stabilization (SettingsActivity). The frequent actions are at the bottom, within a thumb's reach
- * while wearing the glasses and always in the same place: Start/Stop Stabilization, Recenter and
- * the large Mouse button. Stabilizing starts by itself when the app opens (once, so stopping it
- * sticks while the app stays open); starting asks for Shizuku permission the first time. Over adb:
+ * while wearing the glasses and always in the same place: Switch to 3D/2D, Start/Stop
+ * Stabilization, Recenter and the large Mouse button. Opening the app starts XR Desk (the
+ * service, which then runs until the glasses are unplugged) without stabilizing; starting asks
+ * for Shizuku permission the first time. Over adb, starting stabilizing too:
  *   am start -n com.droid.xrdesk/.MainActivity --ez start true [--es options "key=value ..."]
  */
 public class MainActivity extends Activity {
@@ -36,22 +38,27 @@ public class MainActivity extends Activity {
     private static final float BUTTON_HEIGHT_IN = 0.5f;  // Start/Stop and Recenter
     private static final float MOUSE_BUTTON_HEIGHT_IN = 1f;
     private static final float ROW_HEIGHT_IN = 0.55f;    // the settings rows, at least
+    private static final long SWITCH_ASKED_MS = 1000;    // Switch to 3D/2D shows "Switching…" from the tap until the service says so
 
     private final Handler mMain = new Handler(Looper.getMainLooper());
     private TextView mStatus;
     private TextView mPictureSummary;
     private TextView mStabilizationSummary;
+    private Button m3d;
     private Button mStartStop;
     private Button mRecenter;
     private boolean mStartWhenReady;
-    private boolean mStartOnOpen;       // start stabilizing once the notification permission is settled
+    private String mAction = StabilizerService.ACTION_RUN;  // what start() asks of the service once Shizuku is ready
+    private boolean mStartOnOpen;       // start XR Desk once the notification permission is settled
+    private boolean mStabilizeOnOpen;   // and stabilize (adb's "start")
+    private long mSwitchAskedMs;
 
     private final Shizuku.OnRequestPermissionResultListener mPermissionListener = (requestCode, result) -> {
         if (requestCode != SHIZUKU_REQUEST) {
             return;
         }
         if (result == PackageManager.PERMISSION_GRANTED) {
-            startStabilizer();
+            startWith(mAction);
         } else {
             mStatus.setText("XR Desk wasn't allowed to use Shizuku. Allow it in the Shizuku app.");
         }
@@ -60,7 +67,7 @@ public class MainActivity extends Activity {
     private final Shizuku.OnBinderReceivedListener mBinderListener = () -> {
         if (mStartWhenReady) {
             mStartWhenReady = false;
-            start();
+            start(mAction);
         }
     };
 
@@ -100,11 +107,18 @@ public class MainActivity extends Activity {
         scroll.addView(root);
         screen.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
+        m3d = button("Switch to 3D", 18, v -> {
+            v.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
+            boolean on = !StabilizerService.in3d();
+            mSwitchAskedMs = SystemClock.uptimeMillis();
+            show3d();
+            start(on ? StabilizerService.ACTION_3D_ON : StabilizerService.ACTION_3D_OFF);
+        });
         mStartStop = button("Start Stabilization", 18, v -> {
             if (StabilizerService.stabilizing()) {
                 send(StabilizerService.ACTION_STOP);
             } else {
-                start();
+                start(StabilizerService.ACTION_START);
             }
         });
         mRecenter = button("Recenter", 18, v -> {
@@ -115,7 +129,9 @@ public class MainActivity extends Activity {
             v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             startActivity(new Intent(this, MouseActivity.class));
         });
-        // Recenter is next to Mouse, as hitting it by mistake does no harm; Stop is one further.
+        // Recenter is next to Mouse, as hitting it by mistake does no harm; Stop is one further, and
+        // Switch to 3D, which blanks the glasses for a few seconds, furthest.
+        screen.addView(m3d, actionParams(BUTTON_HEIGHT_IN, 24));
         screen.addView(mStartStop, actionParams(BUTTON_HEIGHT_IN, 24));
         screen.addView(mRecenter, actionParams(BUTTON_HEIGHT_IN, 24));
         screen.addView(mouse, actionParams(MOUSE_BUTTON_HEIGHT_IN, 48));
@@ -136,31 +152,42 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         if (requestCode == NOTIFICATION_REQUEST) {
-            startOnOpen();  // stabilizing works without notifications; they just don't show
+            startOnOpen();  // XR Desk works without notifications; they just don't show
         }
     }
 
-    /** Starts stabilizing if the app just opened (or adb asked) and it isn't already. */
+    /** Starts XR Desk if the app just opened and it isn't running, and stabilizing if adb asked. */
     private void startOnOpen() {
-        if (mStartOnOpen) {
-            mStartOnOpen = false;
+        if (!mStartOnOpen) {
+            return;
+        }
+        mStartOnOpen = false;
+        if (mStabilizeOnOpen) {
+            mStabilizeOnOpen = false;
             if (!StabilizerService.stabilizing()) {
-                start();
+                start(StabilizerService.ACTION_START);
             }
+        } else if (!StabilizerService.running()) {
+            start(StabilizerService.ACTION_RUN);
         }
     }
 
-    /** singleTask: a later `am start` arrives here instead of onCreate. */
+    /** singleTask: opening the app again, or a later `am start`, arrives here instead of onCreate. */
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        mStartOnOpen = true;
         handleIntent(intent);
         startOnOpen();
         showSummaries();
     }
 
-    /** Extras from adb: "options" saves settings (applied right away), "start" starts, "mouse" opens the mouse screen. */
+    /**
+     * Extras from adb: "options" saves settings (applied right away), "start" starts, "mouse" opens
+     * the mouse screen, "3d" switches the glasses to 3D (true) or 2D (false), "mcu" sends a command
+     * to the glasses (development).
+     */
     private void handleIntent(Intent intent) {
         String options = intent.getStringExtra("options");
         if (options != null) {
@@ -169,10 +196,19 @@ public class MainActivity extends Activity {
             mMain.postDelayed(this::refresh, 100);
         }
         if (intent.getBooleanExtra("start", false)) {
-            mStartOnOpen = true;
+            mStabilizeOnOpen = true;
         }
         if (intent.getBooleanExtra("mouse", false)) {
             startActivity(new Intent(this, MouseActivity.class));
+        }
+        if (intent.hasExtra("3d")) {
+            startForegroundService(new Intent(this, StabilizerService.class).setAction(intent.getBooleanExtra("3d", false)
+                    ? StabilizerService.ACTION_3D_ON : StabilizerService.ACTION_3D_OFF));
+        }
+        String mcu = intent.getStringExtra("mcu");
+        if (mcu != null && StabilizerService.running()) {
+            startService(new Intent(this, StabilizerService.class).setAction(StabilizerService.ACTION_MCU)
+                    .putExtra("mcu", mcu));
         }
     }
 
@@ -183,10 +219,10 @@ public class MainActivity extends Activity {
         mMain.post(mRefresh);
     }
 
-    /** The settings rows' summaries (changed on their screens, or over adb). */
+    /** The settings rows' summaries (changed on their screens, or over adb; the picture's is paused in 3D). */
     private void showSummaries() {
         Options o = Options.load(this);
-        mPictureSummary.setText(PictureActivity.describe(o));
+        mPictureSummary.setText(StabilizerService.in3d() ? "Paused in 3D: full size, centered" : PictureActivity.describe(o));
         mStabilizationSummary.setText(SettingsActivity.describe(o));
     }
 
@@ -203,8 +239,9 @@ public class MainActivity extends Activity {
         Shizuku.removeBinderReceivedListener(mBinderListener);
     }
 
-    /** Checks Shizuku and its permission, then starts the service. */
-    private void start() {
+    /** Checks Shizuku and its permission, then has the service (started if need be) do action. */
+    private void start(String action) {
+        mAction = action;
         if (!Shizuku.pingBinder()) {
             // Shizuku hands its binder to this process shortly after start, if it's running.
             mStartWhenReady = true;
@@ -212,7 +249,7 @@ public class MainActivity extends Activity {
             mMain.postDelayed(() -> {
                 if (mStartWhenReady && !Shizuku.pingBinder()) {
                     mStartWhenReady = false;
-                    mStatus.setText("Shizuku isn't running. Start it in the Shizuku app, then press Start Stabilization.");
+                    mStatus.setText("Shizuku isn't running. Start it in the Shizuku app, then try again.");
                 }
             }, 3000);
             return;
@@ -220,7 +257,7 @@ public class MainActivity extends Activity {
         if (Shizuku.isPreV11()) {
             mStatus.setText("This Shizuku version is too old. Update Shizuku.");
         } else if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-            startStabilizer();
+            startWith(action);
         } else if (Shizuku.shouldShowRequestPermissionRationale()) {
             mStatus.setText("XR Desk was denied access to Shizuku. Allow it in the Shizuku app.");
         } else {
@@ -228,8 +265,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void startStabilizer() {
-        startForegroundService(new Intent(this, StabilizerService.class).setAction(StabilizerService.ACTION_START));
+    private void startWith(String action) {
+        startForegroundService(new Intent(this, StabilizerService.class).setAction(action));
         mMain.postDelayed(this::refresh, 100);
     }
 
@@ -243,10 +280,21 @@ public class MainActivity extends Activity {
     private void refresh() {
         boolean running = StabilizerService.stabilizing();
         if (!mStartWhenReady) {
-            mStatus.setText(StabilizerService.status());
+            String status = StabilizerService.status();
+            mStatus.setText(StabilizerService.switching() ? status + " " + StabilizerService.SWITCH_NOTE : status);
         }
         mStartStop.setText(running ? "Stop Stabilization" : "Start Stabilization");
         mRecenter.setEnabled(running);
+        show3d();
+        showSummaries();
+    }
+
+    /** Switch to 3D / Switch to 2D, or "Switching…" (disabled) from the tap until the glasses are back. */
+    private void show3d() {
+        boolean switching = StabilizerService.switching()
+                || SystemClock.uptimeMillis() - mSwitchAskedMs < SWITCH_ASKED_MS;
+        m3d.setEnabled(!switching);
+        m3d.setText(switching ? "Switching…" : StabilizerService.in3d() ? "Switch to 2D" : "Switch to 3D");
     }
 
     /**
