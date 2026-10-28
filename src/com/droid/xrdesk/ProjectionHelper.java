@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import rikka.shizuku.ShizukuApiConstants;
+
 /**
  * Shizuku user service: runs in its own process as the shell user, which SurfaceFlinger lets
  * change a physical display's projection. Stabilization shifts the glasses' whole picture by
@@ -69,8 +71,8 @@ public class ProjectionHelper extends Binder {
     private static final String USB_DIALOG = ".usb.UsbPermissionActivity";  // in SystemUI
     private static final long USB_DIALOG_WAIT_MS = 3000;
     private static final int IME_POLICY_FALLBACK_DISPLAY = 1;  // WindowManager.DISPLAY_IME_POLICY_FALLBACK_DISPLAY
-    /** Reserved by Shizuku: sent when the service should exit. */
-    private static final int TRANSACTION_DESTROY = 16777114;
+    /** Reserved by Shizuku: sent when the service should exit (the app unbound or died, or a new install replaced it). */
+    private static final int TRANSACTION_DESTROY = ShizukuApiConstants.USER_SERVICE_TRANSACTION_destroy;
     private static final int TYPE_EXTERNAL = 2;  // android.view.Display.TYPE_EXTERNAL (hidden)
 
     private final SurfaceControl.Transaction mTx = new SurfaceControl.Transaction();
@@ -87,6 +89,7 @@ public class ProjectionHelper extends Binder {
     private int mDx;
     private int mDy;
     private boolean mAttached;
+    private boolean mWatchingClient;
     private volatile MousePointer mMouse;
     private int mDisplayId = -1;
     private int mSavedImePolicy = -1;  // the glasses' own keyboard policy while typing mode changed it
@@ -98,6 +101,7 @@ public class ProjectionHelper extends Binder {
     protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
         switch (code) {
             case TRANSACTION_DESTROY:
+                Log.i(TAG, "helper: Shizuku asked it to exit");
                 restoreAndExit();
                 return true;
             case ATTACH: {
@@ -108,7 +112,8 @@ public class ProjectionHelper extends Binder {
                 float offsetX = data.readFloat();
                 float offsetY = data.readFloat();
                 boolean sbs = data.readBoolean();
-                String[] result = attach(client, displayId, fill, offsetX, offsetY, sbs);
+                watchClient(client);
+                String[] result = attach(displayId, fill, offsetX, offsetY, sbs);
                 reply.writeNoException();
                 reply.writeString(result[0]);
                 reply.writeInt(result[1] == null ? -1 : Integer.parseInt(result[1]));
@@ -132,9 +137,12 @@ public class ProjectionHelper extends Binder {
             }
             case DETACH:
                 data.enforceInterface(DESCRIPTOR);
-                restore();
+                try {
+                    restore();
+                } finally {
+                    exitSoon();
+                }
                 reply.writeNoException();
-                exitSoon();
                 return true;
             case KEYBOARD_ON_PHONE: {
                 data.enforceInterface(DESCRIPTOR);
@@ -190,7 +198,7 @@ public class ProjectionHelper extends Binder {
     }
 
     /** Returns {error or null, display id, display name}. */
-    private synchronized String[] attach(IBinder client, int requestedId, float fill, float offsetX, float offsetY,
+    private synchronized String[] attach(int requestedId, float fill, float offsetX, float offsetY,
             boolean sbs) {
         try {
             if (mSetProjection == null) {
@@ -241,10 +249,6 @@ public class ProjectionHelper extends Binder {
                 mDx = 0;
                 mDy = 0;
                 mAttached = true;
-                client.linkToDeath(() -> {
-                    Log.i(TAG, "helper: app died; restoring the display");
-                    restoreAndExit();
-                }, 0);
                 apply();
                 String name = (String) field(info, "name");
                 Log.i(TAG, "helper: attached to display " + id + " (" + name + ", physical " + mPhysicalId
@@ -480,9 +484,30 @@ public class ProjectionHelper extends Binder {
         }
     }
 
+    /** Exits when the app dies, attached or not, so a helper is never left running without it. */
+    private synchronized void watchClient(IBinder client) {
+        if (mWatchingClient) {
+            return;
+        }
+        mWatchingClient = true;
+        try {
+            client.linkToDeath(() -> {
+                Log.i(TAG, "helper: app died; restoring the display");
+                restoreAndExit();
+            }, 0);
+        } catch (RemoteException e) {
+            restoreAndExit();  // already dead
+        }
+    }
+
     private void restoreAndExit() {
-        restore();
-        System.exit(0);
+        try {
+            restore();
+        } catch (Throwable e) {
+            Log.e(TAG, "helper: restore failed", e);
+        } finally {
+            System.exit(0);
+        }
     }
 
     /** Lets the reply reach the caller before the process goes away. */

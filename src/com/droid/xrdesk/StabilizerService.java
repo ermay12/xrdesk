@@ -507,7 +507,7 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         }
         sSwitching = true;
         mSwitchTo3d = on;
-        mMain.removeCallbacks(mVolumeRepeat);  // a volume button whose release goes missing during the switch
+        mMain.removeCallbacks(mVolumeRepeat);  // volume buttons wait until the switch is done
         setStatus(okStatus());
         int mode = on ? XrealProtocol.DISPLAY_MODE_3D : XrealProtocol.DISPLAY_MODE_2D;
         mImu.command(XrealProtocol.MCU_MSG_SET_DISPLAY_MODE, XrealProtocol.displayModeData(mode), reply -> mMain.post(() -> {
@@ -603,12 +603,17 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
         } else if (button == XrealProtocol.BUTTON_VOLUME_UP || button == XrealProtocol.BUTTON_VOLUME_DOWN) {
             if (event == XrealProtocol.BUTTON_DOWN) {
                 mMain.removeCallbacks(mVolumeRepeat);
+                if (sSwitching) {
+                    // The glasses are dark, and their sound briefly moves to the phone, with its own volume.
+                    return;
+                }
                 mVolumeDirection = button == XrealProtocol.BUTTON_VOLUME_UP
                         ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER;
                 mVolumeRepeatUntilMs = SystemClock.uptimeMillis() + VOLUME_REPEAT_MAX_MS;
                 adjustVolume();
                 mMain.postDelayed(mVolumeRepeat, VOLUME_REPEAT_DELAY_MS);
-            } else if (event == XrealProtocol.BUTTON_UP) {
+            } else if (event == XrealProtocol.BUTTON_UP || event == XrealProtocol.BUTTON_CLICK) {
+                // The click follows the release, so the repeat stops even if the release goes missing.
                 mMain.removeCallbacks(mVolumeRepeat);
             }
         }
@@ -709,7 +714,8 @@ public class StabilizerService extends Service implements Choreographer.FrameCal
                 mStreaming = false;
                 mMain.removeCallbacks(mVolumeRepeat);
                 mStab.post(StabilizerService.this::recenter);
-                setStatus((sStabilizing ? "Glasses' motion sensor: " : "Glasses' buttons: ") + detail);
+                setStatus(XrealImuSource.DETACHED.equals(detail) ? "Waiting for the glasses…"
+                        : (sStabilizing ? "Glasses' motion sensor: " : "Glasses' buttons: ") + detail);
                 if (sWant3d != null) {
                     sWant3d = null;
                     switchFailed();

@@ -100,7 +100,9 @@ phone's rotation sensor ──> MouseActivity ──moves, clicks, scroll──>
   rect of the display's SurfaceFlinger projection by the offset
   (`SurfaceControl.Transaction.setDisplayProjection`). Every window, the taskbar and the cursor
   move together, and nothing is redrawn. It reads the display manager's own projection from
-  `dumpsys display` and puts it back when the app stops, or dies (`linkToDeath`).
+  `dumpsys display` and puts it back when the app stops, or dies (`linkToDeath`), and then
+  exits. It also exits when Shizuku asks it to (`ShizukuApiConstants.USER_SERVICE_TRANSACTION_destroy`:
+  the app unbound or died, or a new install replaced it), so a helper never outlives the app.
 - The picture size and position settings (`fill`, `offsetx`, `offsety`) scale that display rect
   about its center and place it (partly off the panel is fine; SurfaceFlinger crops it), under the stabilizer's offset. They hold while not stabilizing
   too, so `StabilizerService` keeps the helper attached (without the IMU) while they're set.

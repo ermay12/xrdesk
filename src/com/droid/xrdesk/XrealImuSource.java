@@ -49,6 +49,8 @@ final class XrealImuSource {
     private static final long MCU_REPLY_TIMEOUT_MS = 1000;
     // The glasses keep a press made while nobody was reading and send it once someone does.
     private static final long STALE_BUTTON_MS = 500;
+    /** onConnected's detail when the glasses' USB side went away (unplugged, or it reconnects by itself). */
+    static final String DETACHED = "the glasses' USB connection went away";
 
     interface Listener {
         /** Reader thread: new samples are in the ring. */
@@ -92,6 +94,7 @@ final class XrealImuSource {
     private final Object mWake = new Object();  // the idle reader waits on it for mStreamWanted
     private volatile Thread mReader;
     private volatile int mRetries;
+    private volatile boolean mDetached;   // the glasses' USB side went away: wait for it to come back, don't retry
     private volatile Mcu mMcuThread;      // while connected
     private boolean mReceiverRegistered;
 
@@ -144,6 +147,7 @@ final class XrealImuSource {
         }
         mEnabled = true;
         mRetries = 0;
+        mDetached = false;
         IntentFilter filter = new IntentFilter();
         filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
         filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
@@ -181,9 +185,11 @@ final class XrealImuSource {
             String action = intent.getAction();
             if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
                 mRetries = 0;
+                mDetached = false;
                 tryConnect("attached");
             } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
                 Log.i(TAG, "xreal: glasses detached");
+                mDetached = true;
                 Thread reader = mReader;
                 if (reader != null) {
                     reader.interrupt();
@@ -216,7 +222,7 @@ final class XrealImuSource {
         }
         UsbDevice device = findDevice();
         if (device == null) {
-            mListener.onConnected(false, "no XREAL xbx a01/a01+ attached (" + why + ")");
+            mListener.onConnected(false, mDetached ? DETACHED : "no XREAL xbx a01/a01+ attached (" + why + ")");
             return;
         }
         if (!mUsbManager.hasPermission(device)) {
@@ -330,6 +336,9 @@ final class XrealImuSource {
                 Log.e(TAG, "xreal: MCU thread didn't stop; leaking the USB connection");
             }
             mReader = null;
+            if (mDetached) {
+                why = DETACHED;
+            }
             Log.i(TAG, "xreal: stopped: " + why);
             mListener.onConnected(false, why);
             maybeRetry();
@@ -338,7 +347,7 @@ final class XrealImuSource {
 
     /** Retries a few times if the glasses are still attached (e.g. a transient USB error); streaming resets the count. */
     private void maybeRetry() {
-        if (!mEnabled) {
+        if (!mEnabled || mDetached) {
             return;
         }
         if (mRetries >= MAX_RETRIES) {
